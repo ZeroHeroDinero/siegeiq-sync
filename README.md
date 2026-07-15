@@ -33,7 +33,7 @@ point of open-sourcing it.
 You need [Go](https://go.dev/dl/) (any recent version) installed.
 
 ```
-git clone https://github.com/YOUR-USERNAME/siegeiq-sync.git
+git clone https://github.com/Cipher/siegeiq-sync.git
 cd siegeiq-sync
 go build -ldflags="-s -w" -o SiegeIQSync.exe
 ```
