@@ -1,0 +1,11 @@
+# Build output
+*.exe
+
+# Local runtime state (normally lives in %APPDATA%\SiegeIQSync\, but ignore if ever present here)
+config.json
+state.json
+sync.log
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
