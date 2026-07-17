@@ -1,257 +1,143 @@
-// SiegeIQ Sync v0.1 - watches the Siege replay folder and uploads new matches.
+// SiegeIQ Sync - watches the Siege replay folder and uploads new matches.
 //
-// TRUST GUARANTEES (also printed in the app - never weaken these):
+// TRUST GUARANTEES (also shown in the app - never weaken these):
 //   - Reads files only. Never touches the game process, memory, or network traffic.
 //   - Watches exactly one directory tree: ...\My Games\Rainbow Six - Siege\<id>\MatchReplay
 //   - Uploads only replay (.rec) files. Nothing else on disk.
-//   - Pause with Ctrl+C. Unlink anytime from siegeiq.gg (Profile -> SiegeIQ Sync).
+//   - Pause anytime from the tray icon. Unlink anytime from siegeiq.gg (Profile -> SiegeIQ Sync).
 //
-// Standard library only - no dependencies. Build: go build (see README.md).
+// Sync lives in the system tray - there is no console window. Status shows up in
+// the tray tooltip/menu and the plain-text log (%APPDATA%\SiegeIQSync\sync.log,
+// opened by the "View log" tray item). The only dependency outside the Go
+// standard library is github.com/getlantern/systray (MIT), used strictly to draw
+// the tray icon and menu, plus its own dependency golang.org/x/sys (the Go team's
+// official low-level Windows package) which we also use for the run-at-startup
+// registry entry. Nothing here changes the trust guarantees above.
+//
+// The code is split by concern for easy reading:
+//
+//	config.go  - config/state files, paths, logging, constants
+//	replay.go  - finding MatchReplay, pairing, uploading (standard-library only)
+//	dialog.go  - the branded native TaskDialog popups (no GUI toolkit)
+//	startup.go - the "launch when Windows starts" registry toggle
+//	update.go  - the built-in auto-updater
+//	main.go    - the tray icon, menu, and the watch loop (this file)
+//
+// Build: see README.md / build.bat. Build with -ldflags="-H=windowsgui" to hide
+// the console window.
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"mime/multipart"
-	"net/http"
-	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/getlantern/systray"
 )
 
-const backend = "https://siegeiq-backend-production.up.railway.app"
-const version = "0.1.0"
-const scanEvery = 20 * time.Second
-const settleFor = 45 * time.Second // a match folder must be quiet this long before upload
-const maxFilesPerMatch = 21
-
-type config struct {
-	DeviceToken string `json:"device_token"`
-	ReplayDir   string `json:"replay_dir"`
-}
-
-type state struct {
-	Uploaded map[string]string `json:"uploaded"` // folder name -> "ok" | "failed"
-}
-
-func configDir() string {
-	base := os.Getenv("APPDATA")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = home
-	}
-	dir := filepath.Join(base, "SiegeIQSync")
-	_ = os.MkdirAll(dir, 0o755)
-	return dir
-}
-
-func loadJSON(path string, v any) {
-	b, err := os.ReadFile(path)
-	if err == nil {
-		_ = json.Unmarshal(b, v)
-	}
-}
-
-func saveJSON(path string, v any) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err == nil {
-		_ = os.WriteFile(path, b, 0o644)
-	}
-}
-
-func logf(format string, a ...any) {
-	line := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), fmt.Sprintf(format, a...))
-	fmt.Println(line)
-	f, err := os.OpenFile(filepath.Join(configDir(), "sync.log"),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err == nil {
-		fmt.Fprintln(f, line)
-		f.Close()
-	}
-}
-
-// findReplayDir locates ...\Documents\My Games\Rainbow Six - Siege\<profile id>\MatchReplay.
-func findReplayDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	root := filepath.Join(home, "Documents", "My Games", "Rainbow Six - Siege")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		mr := filepath.Join(root, e.Name(), "MatchReplay")
-		if st, err := os.Stat(mr); err == nil && st.IsDir() {
-			return mr
-		}
-	}
-	return ""
-}
-
-func postJSON(path string, body any, out any) error {
-	b, _ := json.Marshal(body)
-	resp, err := http.Post(backend+path, "application/json", bytes.NewReader(b))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("%s -> HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	if out != nil {
-		return json.Unmarshal(data, out)
-	}
-	return nil
-}
-
-// pair runs the device-code flow: show a 6-char code, the player enters it on
-// siegeiq.gg (Profile -> SiegeIQ Sync), and we poll until approved.
-func pair(cfg *config, cfgPath string) error {
-	host, _ := os.Hostname()
-	var start struct {
-		UserCode   string `json:"user_code"`
-		DeviceCode string `json:"device_code"`
-		ExpiresMin int    `json:"expires_in_min"`
-	}
-	if err := postJSON("/sync/pair/new", map[string]string{"device_name": host}, &start); err != nil {
-		return err
-	}
-	fmt.Println()
-	fmt.Println("  ==============================================")
-	fmt.Printf("   Your pairing code:   %s\n", start.UserCode)
-	fmt.Println("  ==============================================")
-	fmt.Println("   1. Open siegeiq.gg and sign in")
-	fmt.Println("   2. Click your avatar -> find 'SiegeIQ Sync'")
-	fmt.Println("   3. Type the code above and click 'Link device'")
-	fmt.Printf("   (code expires in %d minutes)\n", start.ExpiresMin)
-	fmt.Println()
-	deadline := time.Now().Add(time.Duration(start.ExpiresMin) * time.Minute)
-	for time.Now().Before(deadline) {
-		time.Sleep(5 * time.Second)
-		var poll struct {
-			Status      string `json:"status"`
-			DeviceToken string `json:"device_token"`
-		}
-		if err := postJSON("/sync/pair/poll", map[string]string{"device_code": start.DeviceCode}, &poll); err != nil {
-			logf("pair poll error (will retry): %v", err)
-			continue
-		}
-		if poll.Status == "approved" && poll.DeviceToken != "" {
-			cfg.DeviceToken = poll.DeviceToken
-			saveJSON(cfgPath, cfg)
-			logf("device linked - you're all set")
-			return nil
-		}
-	}
-	return fmt.Errorf("pairing code expired - restart the app for a fresh one")
-}
-
-// matchReady reports whether a match folder has settled (no writes for settleFor)
-// and returns its .rec files, newest last.
-func matchReady(dir string) ([]string, bool) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, false
-	}
-	var recs []string
-	newest := time.Time{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".rec") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
-		recs = append(recs, filepath.Join(dir, e.Name()))
-	}
-	if len(recs) == 0 || time.Since(newest) < settleFor {
-		return nil, false
-	}
-	sort.Strings(recs)
-	if len(recs) > maxFilesPerMatch {
-		recs = recs[:maxFilesPerMatch]
-	}
-	return recs, true
-}
-
-// upload sends one match's .rec files to /sync/match with the device token.
-// Returns (permanentlyDone, err): 4xx responses are recorded and not retried.
-func upload(cfg *config, files []string) (bool, error) {
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	for _, p := range files {
-		f, err := os.Open(p)
-		if err != nil {
-			continue
-		}
-		part, err := w.CreateFormFile("files", filepath.Base(p))
-		if err == nil {
-			_, _ = io.Copy(part, f)
-		}
-		f.Close()
-	}
-	w.Close()
-	req, err := http.NewRequest("POST", backend+"/sync/match", &buf)
-	if err != nil {
-		return false, err
-	}
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	req.Header.Set("Authorization", "Device "+cfg.DeviceToken)
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, err // network trouble: retry next scan
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	switch {
-	case resp.StatusCode == 200:
-		return true, nil
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return false, fmt.Errorf("unlinked (HTTP %d) - re-pair needed", resp.StatusCode)
-	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		return true, fmt.Errorf("rejected (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	default:
-		return false, fmt.Errorf("server error (HTTP %d) - will retry", resp.StatusCode)
-	}
-}
-
-// checkUpdate asks the server for the latest version and prints a one-line notice if this
-// agent is behind. Public endpoint, best-effort: any error is ignored (never blocks startup).
-func checkUpdate() {
-	resp, err := http.Get(backend + "/sync/latest")
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-	var latest struct {
-		Version string `json:"version"`
-		URL     string `json:"url"`
-	}
-	if json.NewDecoder(resp.Body).Decode(&latest) == nil &&
-		latest.Version != "" && latest.Version != version {
-		logf("a newer SiegeIQ Sync (v%s) is available at %s", latest.Version, latest.URL)
-	}
-}
-
 func main() {
-	fmt.Printf("SiegeIQ Sync v%s\n", version)
-	fmt.Println("Reads replay files only. Never touches the game. Ctrl+C to pause anytime.")
-	checkUpdate()
+	systray.Run(onReady, onExit)
+}
+
+func onReady() {
+	systray.SetIcon(iconICO)
+	systray.SetTitle("")
+	systray.SetTooltip("SiegeIQ Sync v" + version + " - starting up...")
+
+	mStatus := systray.AddMenuItem("Starting up...", "Current status")
+	mStatus.Disable()
+	systray.AddSeparator()
+	mPause := systray.AddMenuItem("Pause syncing", "Stop uploading new matches until resumed")
+	mStartup := systray.AddMenuItemCheckbox("Launch at startup", "Start SiegeIQ Sync automatically when Windows starts", startupEnabled())
+	mUpdate := systray.AddMenuItem("Check for updates", "Check siegeiq.gg for a newer version")
+	mOpenSite := systray.AddMenuItem("Open siegeiq.gg", "Open your SiegeIQ profile")
+	mViewLog := systray.AddMenuItem("View log", "Open the plain-text sync log")
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Quit SiegeIQ Sync", "Stop syncing and exit")
+
+	go runSync(mStatus, mStartup)
+
+	go func() {
+		for {
+			select {
+			case <-mPause.ClickedCh:
+				if atomic.LoadInt32(&paused) == 0 {
+					atomic.StoreInt32(&paused, 1)
+					mPause.SetTitle("Resume syncing")
+					mStatus.SetTitle("Paused - not watching for matches")
+					systray.SetTooltip("SiegeIQ Sync - paused")
+					logf("paused from the tray menu")
+				} else {
+					atomic.StoreInt32(&paused, 0)
+					mPause.SetTitle("Pause syncing")
+					mStatus.SetTitle("Watching for matches...")
+					systray.SetTooltip("SiegeIQ Sync - watching for matches")
+					logf("resumed from the tray menu")
+				}
+
+			case <-mStartup.ClickedCh:
+				if mStartup.Checked() {
+					if err := setStartup(false); err != nil {
+						logf("could not turn off run-at-startup: %v", err)
+					} else {
+						mStartup.Uncheck()
+						logf("run-at-startup turned off from the tray")
+					}
+				} else {
+					if err := setStartup(true); err != nil {
+						logf("could not turn on run-at-startup: %v", err)
+					} else {
+						mStartup.Check()
+						logf("run-at-startup turned on from the tray")
+					}
+				}
+
+			case <-mUpdate.ClickedCh:
+				// Network + a dialog: run off the event loop so the menu stays responsive.
+				go func() {
+					if info := updateAvailable(); info != nil {
+						promptAndUpdate(info)
+					} else {
+						showDialog(dialogSpec{
+							instruction: "You're up to date",
+							content:     fmt.Sprintf("SiegeIQ Sync v%s is the latest version.", version),
+							buttonText:  "Close",
+						})
+					}
+				}()
+
+			case <-mOpenSite.ClickedCh:
+				openURL("https://siegeiq.gg")
+
+			case <-mViewLog.ClickedCh:
+				openInNotepad(filepath.Join(configDir(), "sync.log"))
+
+			case <-mQuit.ClickedCh:
+				systray.Quit()
+				return
+			}
+		}
+	}()
+}
+
+func onExit() {
+	// Nothing to clean up - config/state are saved as they change, not on exit.
+}
+
+// runSync holds the setup + watch loop. It runs in its own goroutine so the
+// tray's event loop (systray.Run) stays responsive the whole time.
+func runSync(mStatus, mStartup *systray.MenuItem) {
+	logf("SiegeIQ Sync v%s starting", version)
+
+	// Clean up after any previous self-update, then check for a new one before
+	// we do anything else - if the player updates, we restart into the new build.
+	cleanupOldExe()
+	if info := updateAvailable(); info != nil {
+		logf("update available: v%s", info.Version)
+		mStatus.SetTitle("Update available - v" + info.Version)
+		promptAndUpdate(info) // may install and restart, exiting this process
+	}
 
 	cfgPath := filepath.Join(configDir(), "config.json")
 	stPath := filepath.Join(configDir(), "state.json")
@@ -266,9 +152,19 @@ func main() {
 	if cfg.ReplayDir == "" {
 		cfg.ReplayDir = findReplayDir()
 		if cfg.ReplayDir == "" {
+			mStatus.SetTitle("Setup needed - see the popup")
 			logf("could not find the MatchReplay folder - is Siege installed and has a match been played?")
-			logf("you can set it manually in %s", cfgPath)
-			fmt.Println("Press Enter to exit."); fmt.Scanln()
+			showDialog(dialogSpec{
+				instruction: "Setup needed",
+				content: "Couldn't find your Rainbow Six Siege replay folder.\r\n\r\n" +
+					"Make sure Siege is installed and you've played at least one match, then quit and reopen " +
+					"SiegeIQ Sync from the tray icon.\r\n\r\n" +
+					"You can also set the folder manually in:\r\n" + cfgPath,
+				footer:       "Need a hand? Visit siegeiq.gg/sync",
+				openSiteURL:  "https://siegeiq.gg/sync",
+				openSiteText: "Open siegeiq.gg/sync",
+				buttonText:   "Close",
+			})
 			return
 		}
 		saveJSON(cfgPath, cfg)
@@ -276,25 +172,46 @@ func main() {
 	logf("watching: %s", cfg.ReplayDir)
 
 	if cfg.DeviceToken == "" {
-		if err := pair(cfg, cfgPath); err != nil {
+		mStatus.SetTitle("Waiting to be linked - see the popup")
+		if err := pair(cfg, cfgPath, mStatus); err != nil {
+			mStatus.SetTitle("Pairing failed - see the log")
 			logf("pairing failed: %v", err)
-			fmt.Println("Press Enter to exit."); fmt.Scanln()
 			return
 		}
+		// Reflect any run-at-startup choice made in the pairing popup, and
+		// celebrate a successful first link.
+		if startupEnabled() {
+			mStartup.Check()
+		} else {
+			mStartup.Uncheck()
+		}
+		showDialog(dialogSpec{
+			instruction: "You're linked!",
+			content: "SiegeIQ Sync is now watching for new matches. After each one, it uploads the replay on " +
+				"its own - your Verified Stats update automatically.\r\n\r\n" +
+				"You can close this window; Sync keeps running in the tray (the SiegeIQ icon near the clock).",
+			footer:       "Pause, view the log, or quit any time from the tray icon.",
+			openSiteURL:  "https://siegeiq.gg",
+			openSiteText: "Open siegeiq.gg",
+			buttonText:   "Great",
+		})
 	}
 
+	mStatus.SetTitle("Watching for matches...")
+	systray.SetTooltip("SiegeIQ Sync - watching for matches")
+
 	for {
-		entries, err := os.ReadDir(cfg.ReplayDir)
+		if atomic.LoadInt32(&paused) == 1 {
+			time.Sleep(scanEvery)
+			continue
+		}
+		names, err := readReplayEntries(cfg.ReplayDir)
 		if err != nil {
 			logf("cannot read replay folder: %v", err)
 			time.Sleep(scanEvery)
 			continue
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			name := e.Name()
+		for _, name := range names {
 			if st.Uploaded[name] != "" {
 				continue
 			}
@@ -303,13 +220,16 @@ func main() {
 				continue
 			}
 			logf("new match: %s (%d round files) - uploading...", name, len(files))
+			mStatus.SetTitle("Uploading " + name + "...")
+			systray.SetTooltip("SiegeIQ Sync - uploading a match")
 			done, err := upload(cfg, files)
 			if err != nil {
 				logf("  %v", err)
-				if strings.Contains(err.Error(), "re-pair") {
+				if isRepairNeeded(err) {
 					cfg.DeviceToken = ""
 					saveJSON(cfgPath, cfg)
-					if perr := pair(cfg, cfgPath); perr != nil {
+					mStatus.SetTitle("Unlinked - re-pairing...")
+					if perr := pair(cfg, cfgPath, mStatus); perr != nil {
 						logf("re-pairing failed: %v", perr)
 						time.Sleep(scanEvery)
 					}
@@ -319,11 +239,15 @@ func main() {
 			if done {
 				if err == nil {
 					st.Uploaded[name] = "ok"
-					logf("  synced ✓")
+					logf("  synced OK")
 				} else {
 					st.Uploaded[name] = "failed"
 				}
 				saveJSON(stPath, st)
+			}
+			if atomic.LoadInt32(&paused) == 0 {
+				mStatus.SetTitle("Watching for matches...")
+				systray.SetTooltip("SiegeIQ Sync - watching for matches")
 			}
 		}
 		time.Sleep(scanEvery)

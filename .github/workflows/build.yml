@@ -1,0 +1,141 @@
+name: build
+
+# Builds the SiegeIQ Sync Windows executable AND the branded Inno Setup
+# installer on every push, tag, or manual run. This mirrors build.bat, so the
+# official download matches what a local build produces:
+#   * no console window (-H=windowsgui)
+#   * the real SiegeIQ icon + version info embedded via go-winres
+#   * a per-user, no-admin installer (installer/siegeiq-sync.iss)
+#
+# Code signing (SignPath) is wired in below but stays OFF until you add the
+# repository secret SIGNPATH_API_TOKEN and the variable SIGNPATH_ORGANIZATION_ID
+# (Settings -> Secrets and variables -> Actions). Until then the build still runs
+# and produces unsigned artifacts - nothing here fails for lack of signing.
+#
+# Pushing a tag like v0.3.0 also publishes a GitHub Release with the installer,
+# the raw exe, and a SHA256SUMS.txt.
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required to create Releases on tag pushes
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # Signing turns on automatically once BOTH of these are configured.
+      SIGN_ENABLED: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Resolve dependencies
+        run: go mod download
+
+      - name: Install go-winres
+        run: go install github.com/tc-hib/go-winres@latest
+
+      - name: Embed branded icon + version info
+        run: go-winres make
+
+      - name: Build SiegeIQSync.exe
+        run: go build -ldflags="-s -w -H=windowsgui" -o SiegeIQSync.exe
+
+      # --- Sign the exe BEFORE it is packed into the installer (so the installed
+      #     app is signed too). No-op until SIGN_ENABLED is true. ---
+      - name: Upload unsigned exe (input for signing)
+        id: exe_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SiegeIQSync-exe-unsigned
+          path: SiegeIQSync.exe
+          if-no-files-found: error
+
+      - name: Sign SiegeIQSync.exe (SignPath)
+        if: env.SIGN_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: siegeiq-sync
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: exe
+          github-artifact-id: ${{ steps.exe_artifact.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Swap in the signed exe
+        if: env.SIGN_ENABLED == 'true'
+        shell: cmd
+        run: copy /Y signed\SiegeIQSync.exe SiegeIQSync.exe
+
+      # --- Build the installer (embeds the exe from the previous step) ---
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\siegeiq-sync.iss'
+
+      # --- Sign the finished installer. No-op until SIGN_ENABLED is true. ---
+      - name: Upload unsigned installer (input for signing)
+        id: setup_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SiegeIQSync-setup-unsigned
+          path: installer/dist/SiegeIQSync-Setup.exe
+          if-no-files-found: error
+
+      - name: Sign SiegeIQSync-Setup.exe (SignPath)
+        if: env.SIGN_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: siegeiq-sync
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.setup_artifact.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: installer/dist
+
+      # --- Checksums for the download page and the in-app auto-updater ---
+      - name: Compute SHA-256 checksums
+        shell: pwsh
+        run: |
+          $lines = @()
+          $lines += (Get-FileHash SiegeIQSync.exe -Algorithm SHA256).Hash.ToLower() + "  SiegeIQSync.exe"
+          $lines += (Get-FileHash installer/dist/SiegeIQSync-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  SiegeIQSync-Setup.exe"
+          $lines | Out-File -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SiegeIQSync-build
+          path: |
+            SiegeIQSync.exe
+            installer/dist/SiegeIQSync-Setup.exe
+            SHA256SUMS.txt
+          if-no-files-found: error
+
+      # --- On a version tag (e.g. v0.3.0), publish a GitHub Release ---
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/dist/SiegeIQSync-Setup.exe
+            SiegeIQSync.exe
+            SHA256SUMS.txt
+          generate_release_notes: true
