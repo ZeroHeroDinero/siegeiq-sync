@@ -18,12 +18,17 @@ traffic. It is a file reader, nothing more — which is exactly why it is irrele
 - **Local and visible.** Config and a plain-text log live in `%APPDATA%\SiegeIQSync\` — open
   **View log** from the tray icon any time you want to see exactly what it's done. Pause or quit
   anytime from the same tray menu.
-- **Almost dependency-free.** The upload/watch logic is standard-library-only Go. The only things
-  pulled in from outside the standard library are [`getlantern/systray`](https://github.com/getlantern/systray)
-  (MIT), used strictly to draw the tray icon and its menu, and its own dependency
-  [`golang.org/x/sys`](https://pkg.go.dev/golang.org/x/sys) (the Go team's official low-level
-  Windows package), which we also use for the one-line "run at startup" registry entry. Neither has
-  any network access of its own.
+- **Almost dependency-free.** The upload/watch logic is standard-library-only Go. Outside the
+  standard library: [`getlantern/systray`](https://github.com/getlantern/systray) (MIT) draws the
+  tray icon and its menu; [`golang.org/x/sys`](https://pkg.go.dev/golang.org/x/sys) (the Go team's
+  official low-level Windows package) backs the "run at startup" registry entry and the registry
+  reads in the security check below; and [`StackExchange/wmi`](https://github.com/StackExchange/wmi)
+  (plus its own dependency, `go-ole`) backs the two WMI reads in that same security check. None of
+  these have any network access of their own.
+- **Reports a system security posture, on request or once at launch.** A read-only check of Secure
+  Boot, TPM 2.0, VBS, HVCI, and Windows build number — all values a signed-in user can already read
+  without an admin prompt. It never blocks or gates the watch loop above; a failed read is logged as
+  `"unknown"`, never guessed. Run it any time with `SiegeIQSync.exe -security-check`.
 
 This repository is public so that anyone can verify those claims by reading the code. That is the
 point of open-sourcing it.
@@ -86,6 +91,7 @@ branded `.exe` icon via [go-winres](https://github.com/tc-hib/go-winres)) and, i
 | `dialog.go` | the branded native TaskDialog popups (no GUI toolkit) |
 | `startup.go` | the "launch when Windows starts" registry toggle |
 | `update.go` | the built-in auto-updater |
+| `security.go` | the read-only system security posture check |
 | `config.go` | config/state files, paths, logging, constants |
 | `installer/` | the Inno Setup script and branded wizard images |
 

@@ -6,28 +6,35 @@
 //   - Uploads only replay (.rec) files. Nothing else on disk.
 //   - Pause anytime from the tray icon. Unlink anytime from siegeiq.gg (Profile -> SiegeIQ Sync).
 //
-// Sync lives in the system tray - there is no console window. Status shows up in
-// the tray tooltip/menu and the plain-text log (%APPDATA%\SiegeIQSync\sync.log,
-// opened by the "View log" tray item). The only dependency outside the Go
-// standard library is github.com/getlantern/systray (MIT), used strictly to draw
-// the tray icon and menu, plus its own dependency golang.org/x/sys (the Go team's
-// official low-level Windows package) which we also use for the run-at-startup
-// registry entry. Nothing here changes the trust guarantees above.
+// Sync lives in the system tray - there is no console window (unless launched
+// with -security-check, see below). Status shows up in the tray tooltip/menu
+// and the plain-text log (%APPDATA%\SiegeIQSync\sync.log, opened by the "View
+// log" tray item). Dependencies outside the Go standard library:
+// github.com/getlantern/systray (MIT) for the tray icon and menu;
+// golang.org/x/sys (the Go team's official low-level Windows package) for the
+// run-at-startup registry entry and the registry reads in security.go; and
+// github.com/StackExchange/wmi (plus its own dependency,
+// github.com/go-ole/go-ole) for the two read-only WMI queries in security.go
+// (TPM and Device Guard status). Every one of those reads local OS/firmware
+// configuration only - see security.go's header for the exact boundary.
+// Nothing here changes the trust guarantees above.
 //
 // The code is split by concern for easy reading:
 //
-//	config.go  - config/state files, paths, logging, constants
-//	replay.go  - finding MatchReplay, pairing, uploading (standard-library only)
-//	dialog.go  - the branded native TaskDialog popups (no GUI toolkit)
-//	startup.go - the "launch when Windows starts" registry toggle
-//	update.go  - the built-in auto-updater
-//	main.go    - the tray icon, menu, and the watch loop (this file)
+//	config.go   - config/state files, paths, logging, constants
+//	replay.go   - finding MatchReplay, pairing, uploading (standard-library only)
+//	dialog.go   - the branded native TaskDialog popups (no GUI toolkit)
+//	startup.go  - the "launch when Windows starts" registry toggle
+//	update.go   - the built-in auto-updater
+//	security.go - the read-only system security posture check
+//	main.go     - the tray icon, menu, and the watch loop (this file)
 //
 // Build: see README.md / build.bat. Build with -ldflags="-H=windowsgui" to hide
 // the console window.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"path/filepath"
 	"sync/atomic"
@@ -37,6 +44,12 @@ import (
 )
 
 func main() {
+	securityCheck := flag.Bool("security-check", false,
+		"run the read-only system security posture check, print JSON, and exit")
+	flag.Parse()
+	if *securityCheck {
+		printSecurityCheckAndExit()
+	}
 	systray.Run(onReady, onExit)
 }
 
@@ -129,6 +142,10 @@ func onExit() {
 // tray's event loop (systray.Run) stays responsive the whole time.
 func runSync(mStatus, mStartup *systray.MenuItem) {
 	logf("SiegeIQ Sync v%s starting", version)
+
+	// Read-only, non-blocking - logs one JSON line to sync.log and never
+	// affects the watch loop below, whatever it finds.
+	go runSecurityCheckOnce()
 
 	// Clean up after any previous self-update, then check for a new one before
 	// we do anything else - if the player updates, we restart into the new build.
