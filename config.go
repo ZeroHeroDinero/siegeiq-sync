@@ -31,6 +31,23 @@ var paused int32
 type config struct {
 	DeviceToken string `json:"device_token"`
 	ReplayDir   string `json:"replay_dir"`
+	// Stored as OFF switches so an absent key means ON. A config file written by an
+	// older build therefore turns the notifications on rather than silently leaving
+	// a new feature dead for every existing install.
+	NotifySoundOff bool `json:"notify_sound_off,omitempty"`
+	NotifyToastOff bool `json:"notify_toast_off,omitempty"`
+}
+
+// configPath is the one place the config filename is spelled.
+func configPath() string { return filepath.Join(configDir(), "config.json") }
+
+// notifyPrefs reads just the two notification switches. onReady needs them to draw the
+// tray checkboxes before runSync has loaded the config, and reading a small JSON file
+// twice at startup is cheaper than restructuring the startup order around it.
+func notifyPrefs() (sound, toast bool) {
+	var c config
+	loadJSON(configPath(), &c)
+	return !c.NotifySoundOff, !c.NotifyToastOff
 }
 
 type state struct {

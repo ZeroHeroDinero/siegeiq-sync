@@ -63,6 +63,13 @@ func onReady() {
 	systray.AddSeparator()
 	mPause := systray.AddMenuItem("Pause syncing", "Stop uploading new matches until resumed")
 	mStartup := systray.AddMenuItemCheckbox("Launch at startup", "Start SiegeIQ Sync automatically when Windows starts", startupEnabled())
+	prefSound, prefToast := notifyPrefs()
+	setNotifySound(prefSound)
+	setNotifyToast(prefToast)
+	mSound := systray.AddMenuItemCheckbox("Play a sound on upload",
+		"A short chime when a match uploads, a sharper one if it fails", prefSound)
+	mToast := systray.AddMenuItemCheckbox("Show a notification on upload",
+		"A tray balloon when a match uploads. Never steals focus from the game", prefToast)
 	mUpdate := systray.AddMenuItem("Check for updates", "Check siegeiq.gg for a newer version")
 	mOpenSite := systray.AddMenuItem("Open siegeiq.gg", "Open your SiegeIQ profile")
 	mViewLog := systray.AddMenuItem("View log", "Open the plain-text sync log")
@@ -105,6 +112,29 @@ func onReady() {
 						logf("run-at-startup turned on from the tray")
 					}
 				}
+
+			case <-mSound.ClickedCh:
+				on := !mSound.Checked()
+				setNotifySound(on)
+				if on {
+					mSound.Check()
+					beep(true) // so the choice is audible the moment it is made
+				} else {
+					mSound.Uncheck()
+				}
+				saveNotifyPrefs()
+				logf("upload sound turned %v from the tray", onOff(on))
+
+			case <-mToast.ClickedCh:
+				on := !mToast.Checked()
+				setNotifyToast(on)
+				if on {
+					mToast.Check()
+				} else {
+					mToast.Uncheck()
+				}
+				saveNotifyPrefs()
+				logf("upload notification turned %v from the tray", onOff(on))
 
 			case <-mUpdate.ClickedCh:
 				// Network + a dialog: run off the event loop so the menu stays responsive.
@@ -162,6 +192,8 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 	st := &state{Uploaded: map[string]string{}}
 	loadJSON(cfgPath, cfg)
 	loadJSON(stPath, st)
+	setNotifySound(!cfg.NotifySoundOff)
+	setNotifyToast(!cfg.NotifyToastOff)
 	if st.Uploaded == nil {
 		st.Uploaded = map[string]string{}
 	}
@@ -202,6 +234,7 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 		} else {
 			mStartup.Uncheck()
 		}
+		notifyPaired()
 		showDialog(dialogSpec{
 			instruction: "You're linked!",
 			content: "SiegeIQ Sync is now watching for new matches. After each one, it uploads the replay on " +
@@ -257,8 +290,10 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 				if err == nil {
 					st.Uploaded[name] = "ok"
 					logf("  synced OK")
+					notifyUploadOK(name)
 				} else {
 					st.Uploaded[name] = "failed"
+					notifyUploadFailed(name, shortReason(err))
 				}
 				saveJSON(stPath, st)
 			}
