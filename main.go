@@ -37,6 +37,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -140,7 +141,10 @@ func onReady() {
 				// Network + a dialog: run off the event loop so the menu stays responsive.
 				go func() {
 					if info := updateAvailable(); info != nil {
-						promptAndUpdate(info)
+						// Same silent path as startup. Somebody who clicked "Check for
+						// updates" has already said yes; asking again is a second
+						// chance to accidentally decline.
+						autoUpdate(info)
 					} else {
 						showDialog(dialogSpec{
 							instruction: "You're up to date",
@@ -180,10 +184,16 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 	// Clean up after any previous self-update, then check for a new one before
 	// we do anything else - if the player updates, we restart into the new build.
 	cleanupOldExe()
+	// If the previous build updated us into existence, say so once. Read BEFORE the
+	// update check below so a marker can never be left behind by an immediate re-update.
+	if from := consumeUpdatedMarker(); from != "" {
+		logf("started after a self-update into v%s", from)
+		notifyUpdated(from)
+	}
 	if info := updateAvailable(); info != nil {
 		logf("update available: v%s", info.Version)
-		mStatus.SetTitle("Update available - v" + info.Version)
-		promptAndUpdate(info) // may install and restart, exiting this process
+		mStatus.SetTitle("Updating to v" + info.Version + "...")
+		autoUpdate(info) // installs and restarts, exiting this process
 	}
 
 	cfgPath := filepath.Join(configDir(), "config.json")
@@ -293,7 +303,14 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 					notifyUploadOK(name)
 				} else {
 					st.Uploaded[name] = "failed"
-					notifyUploadFailed(name, shortReason(err))
+					// An unlinked device is not a normal upload failure and must not read
+					// like one. "Sync will try again" is actively misleading here: it will
+					// try forever and never succeed until the player re-pairs.
+					if strings.Contains(err.Error(), "unlinked") {
+						notifyUnlinked()
+					} else {
+						notifyUploadFailed(name, shortReason(err))
+					}
 				}
 				saveJSON(stPath, st)
 			}

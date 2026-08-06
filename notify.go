@@ -221,6 +221,33 @@ func notifyUploadFailed(match string, reason string) {
 	balloon("Upload failed", msg, false)
 }
 
+// notifyUnlinked fires when the backend rejects this device's token, which is the one
+// failure mode that looks EXACTLY like nothing happening: Sync is running, the tray icon
+// is there, and no match will ever upload again until the player re-pairs.
+//
+// Deduped to once per run on purpose. The watch loop retries on a timer, so alerting on
+// every scan would turn a problem into a siren and get the whole feature switched off.
+var unlinkedWarned int32
+
+func notifyUnlinked() {
+	if !atomic.CompareAndSwapInt32(&unlinkedWarned, 0, 1) {
+		return
+	}
+	beep(false)
+	balloon("SiegeIQ Sync needs re-linking",
+		"This device is no longer linked, so your matches have stopped uploading. "+
+			"Open siegeiq.gg and pair Sync again.", false)
+}
+
+// notifyUpdated fires once, on the first run AFTER a self-update installed. The update
+// itself is silent by design, so this is the only thing that tells the player it
+// happened - which matters when the update is what fixed their problem.
+func notifyUpdated(v string) {
+	beep(true)
+	balloon("SiegeIQ Sync updated",
+		"Now running v"+v+". Nothing to do, syncing carries on as normal.", true)
+}
+
 // notifyPaired is the one-off on a successful first link.
 func notifyPaired() {
 	beep(true)

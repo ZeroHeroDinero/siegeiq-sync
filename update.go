@@ -103,45 +103,56 @@ func updateAvailable() *latestInfo {
 		logf("update v%s is available but no download URL was published", info.Version)
 		return nil
 	}
+	if info.SHA256 == "" {
+		// Don't even offer an update we know applyUpdate will refuse (see the fail-closed
+		// note there) - better to silently stay on the current version than show the user
+		// an "Update now" button that always ends in an error dialog.
+		logf("update v%s is available but the server published no sha256 - not offering it "+
+			"until SYNC_LATEST_SHA256 is set on the backend", info.Version)
+		return nil
+	}
 	return info
 }
 
-// promptAndUpdate asks the player, then (on yes) downloads and installs the
-// update and exits the process - the freshly-launched new version takes over.
-// On decline or failure it returns and Sync keeps running as-is.
-func promptAndUpdate(info *latestInfo) {
-	verifyNote := "Downloaded from siegeiq.gg over HTTPS."
-	if info.SHA256 != "" {
-		verifyNote = "Verified from siegeiq.gg - SHA-256 checked before installing."
-	}
-	confirmed, _ := showConfirm(dialogSpec{
-		instruction: "Update available",
-		content: fmt.Sprintf(
-			"SiegeIQ Sync v%s is ready to install (you have v%s).\r\n\r\n"+
-				"It takes a few seconds and Sync restarts itself. Your link and settings are kept.",
-			info.Version, version),
-		footer:      verifyNote,
-		confirmText: "Update now",
-		buttonText:  "Later",
-	})
-	if !confirmed {
-		logf("update to v%s postponed", info.Version)
-		return
-	}
+// updatedMarkerPath is where a self-update leaves a note for the version that replaces
+// it. The process exits mid-update, so the only way the NEW build can know it arrived
+// via an update is for the old one to write it down first.
+func updatedMarkerPath() string { return filepath.Join(configDir(), "updated_to.txt") }
 
-	logf("updating to v%s...", info.Version)
+// consumeUpdatedMarker returns the version we just updated INTO, once, and clears it.
+// Empty string means this was an ordinary start.
+func consumeUpdatedMarker() string {
+	b, err := os.ReadFile(updatedMarkerPath())
+	if err != nil {
+		return ""
+	}
+	_ = os.Remove(updatedMarkerPath())
+	return strings.TrimSpace(string(b))
+}
+
+// autoUpdate downloads, verifies and installs the update WITHOUT asking, then exits so
+// the freshly-launched new version takes over.
+//
+// Changed 2026-08-06. This used to be promptAndUpdate: it opened a confirm dialog and,
+// on anything other than an explicit click, logged "postponed" and left the player on
+// the old build forever. That is a fine default for a feature. It is the wrong default
+// for a FIX — v0.3.1 was the release that added upload notifications, it was published
+// correctly with a checksum, and players still did not have it because the dialog was
+// easy to miss behind a full-screen game. A verified, checksum-matched build from our
+// own backend does not need permission to install itself.
+//
+// The security posture is unchanged: applyUpdate still refuses anything without a
+// matching SHA-256. Silent means no dialog, not unverified.
+func autoUpdate(info *latestInfo) {
+	logf("updating to v%s (silent)...", info.Version)
 	if err := applyUpdate(info); err != nil {
-		logf("update failed: %v", err)
-		showDialog(dialogSpec{
-			instruction: "Update didn't finish",
-			content: "Sync will keep running on the current version.\r\n\r\n" +
-				"You can grab the latest build any time from siegeiq.gg/sync.",
-			footer:       "",
-			openSiteURL:  "https://siegeiq.gg/sync",
-			openSiteText: "Open siegeiq.gg/sync",
-			buttonText:   "Close",
-		})
+		// No modal here either. A failed update is not the player's problem to solve
+		// mid-match; Sync keeps working on the current build and the log has the detail.
+		logf("update failed, staying on v%s: %v", version, err)
 		return
+	}
+	if err := os.WriteFile(updatedMarkerPath(), []byte(info.Version), 0o600); err != nil {
+		logf("could not write the updated-to marker: %v", err)
 	}
 	logf("update installed - restarting into v%s", info.Version)
 	os.Exit(0)
@@ -149,20 +160,38 @@ func promptAndUpdate(info *latestInfo) {
 
 // applyUpdate downloads, verifies, and swaps in the new exe, then relaunches it.
 func applyUpdate(info *latestInfo) error {
+	// Fail CLOSED: a missing sha256 is refused, not silently trusted. This used to be
+	// "verify IF the server sent a hash," which meant that for as long as the backend's
+	// /sync/latest never actually populated the sha256 field (true today - see
+	// siegeiq_stripe.py's /sync/latest, which returns no sha256 at all) every single
+	// auto-update installed an exe from SYNC_DOWNLOAD_URL with NO integrity check beyond
+	// "the download happened over HTTPS." That's exactly the unsigned-auto-updater risk
+	// called out in the pre-launch security review: a compromised download URL or a MITM
+	// on that connection could hand every installed copy of Sync a malicious exe and it
+	// would just be installed.
+	//
+	// Requiring the hash means self-update is a no-op (logs and returns, current version
+	// keeps running - see updateAvailable's caller) until the backend actually publishes a
+	// real SYNC_LATEST_SHA256 for each release. That is the correct failure mode: refuse an
+	// unverifiable binary rather than install it. Users can still grab the current, SignPath
+	// code-signed build by hand from siegeiq.gg/sync in the meantime.
+	if info.SHA256 == "" {
+		return fmt.Errorf("update server did not publish a sha256 for v%s - refusing to "+
+			"install an unverified binary (see SYNC_LATEST_SHA256 on the backend)", info.Version)
+	}
+
 	tmp, err := downloadToTemp(info.URL)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 	defer os.Remove(tmp)
 
-	if info.SHA256 != "" {
-		sum, err := sha256File(tmp)
-		if err != nil {
-			return err
-		}
-		if !strings.EqualFold(sum, info.SHA256) {
-			return fmt.Errorf("checksum mismatch (got %s, expected %s)", sum, info.SHA256)
-		}
+	sum, err := sha256File(tmp)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(sum, info.SHA256) {
+		return fmt.Errorf("checksum mismatch (got %s, expected %s)", sum, info.SHA256)
 	}
 
 	exe, err := os.Executable()
