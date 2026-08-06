@@ -17,7 +17,7 @@ import (
 // backend is the SiegeIQ API root. version is the running build - keep it in
 // lockstep with winres/winres.json and the installer's AppVersion.
 const backend = "https://siegeiq-backend-production.up.railway.app"
-const version = "0.3.2"
+const version = "0.3.3"
 
 const (
 	scanEvery        = 20 * time.Second // how often the watch loop rescans the replay folder
