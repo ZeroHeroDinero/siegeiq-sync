@@ -34,44 +34,6 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      # --- One version number, one source of truth: the tag ---
-      # Before this existed the version lived in three files by hand (config.go,
-      # winres/winres.json, installer/siegeiq-sync.iss) and v0.3.3 shipped with two of
-      # them still reading 0.3.0, because the updated copies were uploaded to the repo
-      # root instead of into their folders. Windows Properties and the installer window
-      # then disagreed with the app itself. Stamping all three from the tag makes that
-      # class of mistake impossible: whatever you tag is what every version string says.
-      - name: Stamp the version from the tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
-          if ($v -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Tag '${{ github.ref_name }}' is not vMAJOR.MINOR.PATCH - refusing to build."
-          }
-          Write-Host "Stamping version $v"
-
-          $p = 'config.go'
-          (Get-Content $p -Raw) -replace '(?m)^const version = "[^"]*"', "const version = `"$v`"" |
-            Set-Content $p -NoNewline
-
-          $p = 'winres/winres.json'
-          $j = Get-Content $p -Raw
-          $j = $j -replace '"file_version":\s*"[^"]*"',    "`"file_version`": `"$v.0`""
-          $j = $j -replace '"product_version":\s*"[^"]*"', "`"product_version`": `"$v.0`""
-          $j = $j -replace '"FileVersion":\s*"[^"]*"',     "`"FileVersion`": `"$v`""
-          $j = $j -replace '"ProductVersion":\s*"[^"]*"',  "`"ProductVersion`": `"$v`""
-          Set-Content $p $j -NoNewline
-
-          $p = 'installer/siegeiq-sync.iss'
-          (Get-Content $p -Raw) -replace '(?m)^#define MyAppVersion "[^"]*"', "#define MyAppVersion `"$v`"" |
-            Set-Content $p -NoNewline
-
-          Write-Host "--- stamped ---"
-          Select-String -Path config.go -Pattern '^const version'
-          Select-String -Path winres/winres.json -Pattern '(file_version|product_version|FileVersion|ProductVersion)'
-          Select-String -Path installer/siegeiq-sync.iss -Pattern '^#define MyAppVersion'
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

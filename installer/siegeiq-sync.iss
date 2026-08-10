@@ -15,7 +15,7 @@
 ; -----------------------------------------------------------------------------
 
 #define MyAppName "SiegeIQ Sync"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "SiegeIQ"
 #define MyAppURL "https://siegeiq.gg"
 #define MyAppExeName "SiegeIQSync.exe"
@@ -73,6 +73,18 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Source: "..\SiegeIQSync.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+
+; --- Recorder: the capture engine ------------------------------------------
+; ffmpeg.exe is what the screen recorder uses to grab and encode frames. It is
+; run as a SEPARATE PROCESS, never linked into SiegeIQSync.exe, which is what
+; keeps the licensing to an attribution notice rather than a source obligation.
+;
+; skipifsourcedoesntexist means a build machine without a copy of ffmpeg still
+; produces a working installer - the recorder simply reports that it cannot find
+; a capture engine, and syncing is completely unaffected. Drop ffmpeg.exe into
+; siegeiq-sync\ffmpeg\ to have it bundled.
+Source: "..\ffmpeg\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\ffmpeg\FFMPEG-LICENSE.txt"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "Watch for new Siege matches and upload them to SiegeIQ"

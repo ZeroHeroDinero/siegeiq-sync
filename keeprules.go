@@ -1,0 +1,156 @@
+// keeprules.go - deciding what survives out of the buffer.
+//
+// This is the file that makes SiegeIQ's recorder different from every other
+// recorder a Siege player already has.
+//
+// Medal, ShadowPlay and OBS all keep a rolling buffer. None of them know what
+// happened in the match, so the best they can offer is "the last N seconds" and
+// a hotkey the player has to remember to press. We hold the same buffer AND the
+// match's replay files, so we can answer questions they structurally cannot:
+// keep the action phase and throw away the drone phase, keep only the rounds
+// where I died, keep the round I clutched.
+//
+// # HONESTY RULE FOR THIS FILE
+//
+// Three of the rules need to know what actually happened inside a round - who
+// died, who got a kill, who was last alive. That comes from decoded replay data,
+// which the desktop app does not have on its own. When it is missing, the rule
+// DEGRADES to keeping the whole action phase and says so in the log and in the
+// note attached to the clip. It never guesses which rounds those were, because a
+// clip labelled "the round you clutched" that is not the round they clutched is
+// worse than no clip at all.
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+// keepSpan is one piece of footage worth writing out.
+type keepSpan struct {
+	Label      string // becomes part of the filename: r03-action
+	RoundIndex int
+	From, To   time.Time
+	Estimated  bool   // the boundaries were inferred, not decoded
+	Reason     string // why this span was kept, for the log and the clip sidecar
+}
+
+func (s keepSpan) duration() time.Duration { return s.To.Sub(s.From) }
+
+// evaluateKeepRule turns a located match plus the player's chosen rule into a
+// list of spans to cut. notes carries anything the player should know: a rule
+// that degraded, a round that was skipped, an estimate that was used.
+func evaluateKeepRule(plan matchPlan, rc recorderConfig) (spans []keepSpan, notes []string) {
+	if len(plan.Rounds) == 0 {
+		return nil, []string{"no rounds found in this match"}
+	}
+
+	pre := time.Duration(rc.PrePadSec) * time.Second
+	post := time.Duration(rc.PostPadSec) * time.Second
+
+	rule := rc.KeepRule
+	if rc.needsEvents() && plan.Events == nil {
+		notes = append(notes, fmt.Sprintf(
+			"%q needs decoded round detail, which is not available for this match - kept the action phase of every round instead",
+			rule))
+		rule = KeepActionOnly
+	}
+
+	add := func(label string, idx int, from, to time.Time, exact bool, reason string) {
+		from = from.Add(-pre)
+		to = to.Add(post)
+		if !to.After(from) {
+			return
+		}
+		spans = append(spans, keepSpan{
+			Label:      label,
+			RoundIndex: idx,
+			From:       from,
+			To:         to,
+			Estimated:  !exact,
+			Reason:     reason,
+		})
+	}
+
+	switch rule {
+	case KeepNothing:
+		return nil, append(notes, "keep rule is 'nothing' - the buffer runs but nothing is written out")
+
+	case KeepWholeMatch:
+		from, to, ok := plan.span()
+		if !ok {
+			return nil, append(notes, "could not locate the match in time")
+		}
+		exact := true
+		for _, r := range plan.Rounds {
+			if !r.Exact {
+				exact = false
+				break
+			}
+		}
+		add("match", 0, from, to, exact, "whole match")
+		return spans, notes
+
+	case KeepActionOnly:
+		for _, r := range plan.Rounds {
+			add(fmt.Sprintf("r%02d-action", r.Index), r.Index,
+				r.ActionStart, r.End, r.Exact, "action phase")
+		}
+		return spans, notes
+
+	case KeepLastSeconds:
+		n := time.Duration(rc.LastSeconds) * time.Second
+		for _, r := range plan.Rounds {
+			from := r.End.Add(-n)
+			if from.Before(r.Start) {
+				from = r.Start
+			}
+			add(fmt.Sprintf("r%02d-last%ds", r.Index, rc.LastSeconds), r.Index,
+				from, r.End, r.Exact, fmt.Sprintf("last %d seconds", rc.LastSeconds))
+		}
+		return spans, notes
+
+	case KeepMyDeaths, KeepMyKills, KeepClutches:
+		kept := 0
+		for _, r := range plan.Rounds {
+			e, ok := plan.eventFor(r.Index)
+			if !ok {
+				continue
+			}
+			var want bool
+			var reason string
+			switch rule {
+			case KeepMyDeaths:
+				want, reason = e.UploaderDied, "you died this round"
+			case KeepMyKills:
+				want, reason = e.UploaderKills > 0, fmt.Sprintf("%d kill(s)", e.UploaderKills)
+			case KeepClutches:
+				want, reason = e.UploaderClutch, "clutch round"
+			}
+			if !want {
+				continue
+			}
+			kept++
+			add(fmt.Sprintf("r%02d-%s", r.Index, shortRule(rule)), r.Index,
+				r.ActionStart, r.End, r.Exact, reason)
+		}
+		if kept == 0 {
+			notes = append(notes, fmt.Sprintf("no rounds in this match matched %q - nothing kept", rule))
+		}
+		return spans, notes
+	}
+
+	return nil, append(notes, fmt.Sprintf("unknown keep rule %q - nothing kept", rule))
+}
+
+func shortRule(rule string) string {
+	switch rule {
+	case KeepMyDeaths:
+		return "death"
+	case KeepMyKills:
+		return "kills"
+	case KeepClutches:
+		return "clutch"
+	}
+	return "clip"
+}

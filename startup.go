@@ -37,7 +37,27 @@ func startupEnabled() bool {
 	if err != nil {
 		return v != ""
 	}
-	return strings.EqualFold(strings.Trim(v, `"`), exe)
+	return strings.EqualFold(exePathFromRunValue(v), exe)
+}
+
+// exePathFromRunValue pulls the executable out of a Run value that may carry
+// arguments after it, e.g. `"C:\...\SiegeIQSync.exe" -startup`.
+//
+// The -startup flag is how the app knows it was launched by Windows at sign-in
+// rather than double-clicked. Launched by hand, it shows its window; launched
+// at sign-in, it stays quietly in the tray. Without the flag it cannot tell the
+// two apart, and either choice is wrong half the time.
+func exePathFromRunValue(v string) string {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, `"`) {
+		if end := strings.Index(v[1:], `"`); end >= 0 {
+			return v[1 : end+1]
+		}
+	}
+	if i := strings.Index(v, " -"); i > 0 {
+		return strings.TrimSpace(v[:i])
+	}
+	return v
 }
 
 // setStartup adds or removes the Run entry. The path is quoted so it survives
@@ -53,7 +73,9 @@ func setStartup(on bool) error {
 		if err != nil {
 			return err
 		}
-		return k.SetStringValue(runValueName, `"`+exe+`"`)
+		// The flag tells the app it is being started by Windows, so it does
+		// not throw a window at somebody who has just signed in.
+		return k.SetStringValue(runValueName, `"`+exe+`" -startup`)
 	}
 	err = k.DeleteValue(runValueName)
 	if err == registry.ErrNotExist {

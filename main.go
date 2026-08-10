@@ -47,7 +47,10 @@ import (
 func main() {
 	securityCheck := flag.Bool("security-check", false,
 		"run the read-only system security posture check, print JSON, and exit")
+	startupLaunch := flag.Bool("startup", false,
+		"set by the run-at-startup registry entry; starts quietly in the tray without opening the window")
 	flag.Parse()
+	launchedByWindows = *startupLaunch
 	if *securityCheck {
 		printSecurityCheckAndExit()
 	}
@@ -62,7 +65,12 @@ func onReady() {
 	mStatus := systray.AddMenuItem("Starting up...", "Current status")
 	mStatus.Disable()
 	systray.AddSeparator()
+	// First real item in the menu: the app window is now the main way to use
+	// Sync. The tray stays as the quick controls and the always-there presence.
+	mOpenApp := systray.AddMenuItem("Open SiegeIQ Sync", "Settings, your clips, and what the recorder is doing")
+	systray.AddSeparator()
 	mPause := systray.AddMenuItem("Pause syncing", "Stop uploading new matches until resumed")
+	registerSyncPauseItem(mPause)
 	mStartup := systray.AddMenuItemCheckbox("Launch at startup", "Start SiegeIQ Sync automatically when Windows starts", startupEnabled())
 	prefSound, prefToast := notifyPrefs()
 	setNotifySound(prefSound)
@@ -74,27 +82,31 @@ func onReady() {
 	mUpdate := systray.AddMenuItem("Check for updates", "Check siegeiq.gg for a newer version")
 	mOpenSite := systray.AddMenuItem("Open siegeiq.gg", "Open your SiegeIQ profile")
 	mViewLog := systray.AddMenuItem("View log", "Open the plain-text sync log")
+
+	// The recorder owns its own menu and its own switches. Nothing in here
+	// touches syncing, and nothing in the sync menu above touches the recorder.
+	// All four combinations are valid: sync only, recorder only, both, neither.
+	systray.AddSeparator()
+	recMenu := buildRecorderMenu()
+
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit SiegeIQ Sync", "Stop syncing and exit")
 
+	go recMenu.run()
 	go runSync(mStatus, mStartup)
 
 	go func() {
 		for {
 			select {
 			case <-mPause.ClickedCh:
-				if atomic.LoadInt32(&paused) == 0 {
-					atomic.StoreInt32(&paused, 1)
-					mPause.SetTitle("Resume syncing")
-					mStatus.SetTitle("Paused - not watching for matches")
-					systray.SetTooltip("SiegeIQ Sync - paused")
-					logf("paused from the tray menu")
+				// The label is set by setSyncPaused so the app window's copy of
+				// this control stays in step with the menu.
+				if toggleSyncPause() {
+					mStatus.SetTitle("Paused - not uploading new matches")
+					systray.SetTooltip("SiegeIQ Sync - uploads paused")
 				} else {
-					atomic.StoreInt32(&paused, 0)
-					mPause.SetTitle("Pause syncing")
 					mStatus.SetTitle("Watching for matches...")
 					systray.SetTooltip("SiegeIQ Sync - watching for matches")
-					logf("resumed from the tray menu")
 				}
 
 			case <-mStartup.ClickedCh:
@@ -154,6 +166,9 @@ func onReady() {
 					}
 				}()
 
+			case <-mOpenApp.ClickedCh:
+				openAppWindow()
+
 			case <-mOpenSite.ClickedCh:
 				openURL("https://siegeiq.gg")
 
@@ -206,6 +221,34 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 	setNotifyToast(!cfg.NotifyToastOff)
 	if st.Uploaded == nil {
 		st.Uploaded = map[string]string{}
+	}
+	if st.Clipped == nil {
+		st.Clipped = map[string]string{}
+	}
+
+	// The recorder starts here, before pairing and before the replay folder has
+	// even been located. It needs no device token to buffer footage or cut
+	// clips, so somebody who has not linked their account yet still gets a
+	// working recorder - and somebody whose pairing has lapsed does not lose
+	// their footage on top of losing their uploads.
+	rec.configure(cfg)
+	logf("recorder: %s", recorderSummary(cfg.Recorder))
+	go rec.run()
+
+	// Opening the window is about INTENT, not about whether it has ever been
+	// opened before. Somebody who double-clicks the app wants to see it, every
+	// time. Somebody who just signed in to Windows did not ask for anything and
+	// should get a tray icon and silence.
+	//
+	// The earlier "only ever once" rule got this wrong in both directions: it
+	// ignored a deliberate launch, and it would have thrown a window at every
+	// new install on sign-in.
+	if !launchedByWindows {
+		cfg.WindowShown = true
+		saveJSON(cfgPath, cfg)
+		openAppWindow()
+	} else {
+		logf("started by Windows at sign-in - staying in the tray")
 	}
 
 	if cfg.ReplayDir == "" {
@@ -261,10 +304,9 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 	systray.SetTooltip("SiegeIQ Sync - watching for matches")
 
 	for {
-		if atomic.LoadInt32(&paused) == 1 {
-			time.Sleep(scanEvery)
-			continue
-		}
+		// NOTE: the scan itself is no longer skipped while syncing is paused.
+		// The recorder needs to see settled matches even when nothing is being
+		// uploaded, and the pause check has moved down to guard only the upload.
 		names, err := readReplayEntries(cfg.ReplayDir)
 		if err != nil {
 			logf("cannot read replay folder: %v", err)
@@ -272,11 +314,43 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 			continue
 		}
 		for _, name := range names {
-			if st.Uploaded[name] != "" {
+			dir := filepath.Join(cfg.ReplayDir, name)
+			files, ready := matchReady(dir)
+			if !ready {
 				continue
 			}
-			files, ready := matchReady(filepath.Join(cfg.ReplayDir, name))
-			if !ready {
+
+			// The recorder sees every settled match exactly once, whether or not
+			// uploading is paused. Cutting footage on round boundaries needs only
+			// these files' timestamps, which are already here on disk - nothing
+			// has to be uploaded, parsed server-side, or even opened.
+			if st.Clipped[name] == "" {
+				st.Clipped[name] = "seen"
+				saveJSON(stPath, st)
+				rec.handleMatch(dir, files)
+			}
+
+			if atomic.LoadInt32(&paused) == 1 {
+				continue
+			}
+			if prev := st.Uploaded[name]; prev != "" {
+				// A match that was uploaded and has since GROWN means rounds were
+				// sent before the match finished - which is exactly what the old
+				// 45-second settle rule did on every live game. Re-sending is not
+				// done automatically yet, because whether the backend treats a
+				// second POST of the same match as an update or as a duplicate has
+				// not been confirmed, and quietly doubling somebody's Verified
+				// Stats would be a worse bug than the one being fixed. So it says
+				// so, loudly, once.
+				if n, ok := uploadedCount(prev); ok && len(files) > n {
+					if st.Uploaded[name+"#short"] == "" {
+						st.Uploaded[name+"#short"] = "logged"
+						saveJSON(stPath, st)
+						logf("NOTE: %s was uploaded with %d round file(s) and now has %d. "+
+							"The earlier upload was incomplete - this match needs re-sending once "+
+							"the backend is confirmed to replace rather than duplicate.", name, n, len(files))
+					}
+				}
 				continue
 			}
 			logf("new match: %s (%d round files) - uploading...", name, len(files))
@@ -298,8 +372,8 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 			}
 			if done {
 				if err == nil {
-					st.Uploaded[name] = "ok"
-					logf("  synced OK")
+					st.Uploaded[name] = fmt.Sprintf("ok:%d", len(files))
+					logf("  synced OK (%d round files)", len(files))
 					notifyUploadOK(name)
 				} else {
 					st.Uploaded[name] = "failed"

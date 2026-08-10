@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -199,8 +200,26 @@ func pair(cfg *config, cfgPath string, mStatus *systray.MenuItem) error {
 	return fmt.Errorf("pairing code expired - restart the app for a fresh one")
 }
 
-// matchReady reports whether a match folder has settled (no writes for
-// settleFor) and returns its .rec files, newest last.
+// matchReady reports whether a match is OVER, and returns its .rec files.
+//
+// # THE BUG THIS REPLACED, AND WHY IT MATTERED
+//
+// The old rule was "no writes for 45 seconds". That is not how Siege writes
+// replays. One .rec is written at the END of each round, and the gap between
+// one round ending and the next one ending is several minutes. So 45 seconds of
+// quiet does not mean the match finished - it means round one finished and
+// round two is being played right now.
+//
+// The consequence was invisible and bad: every live match uploaded after its
+// FIRST round, was marked done, and rounds two onward were never sent at all.
+// Verified Stats were being built from one round of every match. It also
+// explains the notification firing part-way through a game, which is how it was
+// noticed - the sound was the only visible symptom of a silent data loss.
+//
+// The new rule uses the one fact that settles it: whether Siege is still
+// running. Game closed means the match is definitely over, so a short quiet
+// period is enough. Game still open means the only honest signal is a gap
+// longer than a round could possibly be.
 func matchReady(dir string) ([]string, bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -221,9 +240,18 @@ func matchReady(dir string) ([]string, bool) {
 		}
 		recs = append(recs, filepath.Join(dir, e.Name()))
 	}
-	if len(recs) == 0 || time.Since(newest) < settleFor {
+	if len(recs) == 0 {
 		return nil, false
 	}
+
+	quiet := settleFor
+	if siegeRunning() {
+		quiet = matchOverFor
+	}
+	if time.Since(newest) < quiet {
+		return nil, false
+	}
+
 	sort.Strings(recs)
 	if len(recs) > maxFilesPerMatch {
 		recs = recs[:maxFilesPerMatch]
@@ -271,4 +299,21 @@ func upload(cfg *config, files []string) (bool, error) {
 	default:
 		return false, fmt.Errorf("server error (HTTP %d) - will retry", resp.StatusCode)
 	}
+}
+
+// uploadedCount reads how many round files an earlier upload actually sent.
+//
+// Old state files hold a bare "ok" with no count, from before this mattered.
+// Those report false rather than zero, so a match uploaded by an older build is
+// left alone instead of being reported as incomplete on no evidence.
+func uploadedCount(v string) (int, bool) {
+	rest, ok := strings.CutPrefix(v, "ok:")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }

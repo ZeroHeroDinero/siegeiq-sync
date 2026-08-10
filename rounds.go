@@ -1,0 +1,205 @@
+// rounds.go - working out when each round happened, so the buffer can be cut
+// into rounds instead of arbitrary chunks.
+//
+// # HOW WE KNOW WHEN A ROUND ENDED, WITHOUT PARSING ANYTHING
+//
+// Siege writes one .rec file per round, at the moment that round finishes. So
+// the file's modification time IS the round's end, to within a second or two of
+// disk flush. That single fact is what lets a client with no replay parser at
+// all still cut footage on round boundaries.
+//
+// Round STARTS are inferred, and this file is deliberate about saying so:
+//
+//   - Round N starts shortly after round N-1 ended (end-of-round screen, then
+//     operator select). That gap is a constant here, not a measurement.
+//   - Round 1 has nothing before it, so its start is walked back from its end by
+//     an assumed length.
+//
+// Everything produced here is therefore marked Estimated, and the padding in the
+// keep rules is sized to cover the error. It is good to a few seconds, which is
+// the right precision for "give me the action phase" and the wrong precision for
+// anything claiming to be a measurement.
+//
+// # THE UPGRADE PATH, ALREADY WIRED
+//
+// The backend decodes the real round clock out of the replay. When it can hand
+// back exact per-round boundaries, they arrive as matchEvents and override every
+// estimate below without changing a line of the trimming code. Until then the
+// estimate is used and honestly labelled - it never claims to be exact.
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+)
+
+// Timing assumptions, all in seconds. These are Siege's published phase lengths
+// plus a realistic allowance for loading, not measured values.
+const (
+	prepPhaseSeconds  = 45  // preparation / drone phase in Ranked and Standard
+	maxRoundSeconds   = 240 // prep + action + a generous end-of-round allowance
+	minRoundSeconds   = 25  // a round that ends this fast was a very quick wipe
+	interRoundSeconds = 14  // end-of-round screen through to the next round starting
+	firstRoundGuess   = 150 // how far back to reach for round 1, which has no predecessor
+)
+
+// roundSpan is one round located in wall-clock time.
+type roundSpan struct {
+	Index       int       // 1-based, matching R01, R02 ...
+	File        string    // the .rec this round was derived from
+	Start       time.Time // estimated unless Exact
+	ActionStart time.Time // when the prep phase ends and the round goes live
+	End         time.Time // the .rec's modification time - the reliable end
+	Exact       bool      // true only when the backend supplied real boundaries
+}
+
+// roundEvent is per-round detail that only decoded replay data can provide. It
+// is what the "rounds I died in" style keep rules need. Absent until the backend
+// supplies it; never guessed.
+type roundEvent struct {
+	Index          int  `json:"index"`
+	UploaderDied   bool `json:"uploader_died"`
+	UploaderKills  int  `json:"uploader_kills"`
+	UploaderClutch bool `json:"uploader_clutch"`
+	// Exact boundaries, seconds relative to the round's end. Zero means unknown.
+	StartBeforeEndSec  float64 `json:"start_before_end_sec"`
+	ActionBeforeEndSec float64 `json:"action_before_end_sec"`
+}
+
+// matchEvents is the optional decoded detail for a whole match.
+type matchEvents struct {
+	MatchID string       `json:"match_id"`
+	Rounds  []roundEvent `json:"rounds"`
+}
+
+// matchPlan is everything the trimmer needs about one match.
+type matchPlan struct {
+	Dir      string
+	Rounds   []roundSpan
+	Events   *matchEvents
+	Estimate bool // true when any round boundary was inferred rather than decoded
+}
+
+// span returns the whole match from the first round's start to the last round's
+// end, which is what KeepWholeMatch cuts.
+func (p matchPlan) span() (time.Time, time.Time, bool) {
+	if len(p.Rounds) == 0 {
+		return time.Time{}, time.Time{}, false
+	}
+	return p.Rounds[0].Start, p.Rounds[len(p.Rounds)-1].End, true
+}
+
+// eventFor finds the decoded detail for a round, if there is any.
+func (p matchPlan) eventFor(index int) (roundEvent, bool) {
+	if p.Events == nil {
+		return roundEvent{}, false
+	}
+	for _, e := range p.Events.Rounds {
+		if e.Index == index {
+			return e, true
+		}
+	}
+	return roundEvent{}, false
+}
+
+// planMatch turns a match folder's .rec files into located rounds.
+//
+// files is the same slice matchReady already produces for the uploader, so the
+// recorder and the sync watcher agree on what a match is - one folder, one
+// match, one set of rounds, whether or not uploading is switched on.
+func planMatch(dir string, files []string) matchPlan {
+	type recFile struct {
+		path string
+		mod  time.Time
+	}
+
+	var recs []recFile
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		recs = append(recs, recFile{path: f, mod: info.ModTime()})
+	}
+	if len(recs) == 0 {
+		return matchPlan{Dir: dir}
+	}
+
+	// Sort by filename, which is R01, R02 ... and matches round order. Sorting by
+	// mtime would look equivalent and quietly reorder a match where two rounds
+	// flushed within the same second.
+	sort.Slice(recs, func(i, j int) bool {
+		return filepath.Base(recs[i].path) < filepath.Base(recs[j].path)
+	})
+
+	plan := matchPlan{Dir: dir, Estimate: true}
+	for i, r := range recs {
+		span := roundSpan{
+			Index: i + 1,
+			File:  r.path,
+			End:   r.mod,
+		}
+
+		if i == 0 {
+			span.Start = r.mod.Add(-firstRoundGuess * time.Second)
+		} else {
+			candidate := recs[i-1].mod.Add(interRoundSeconds * time.Second)
+			length := r.mod.Sub(candidate)
+			switch {
+			case length > maxRoundSeconds*time.Second:
+				// A long gap means something happened between rounds that is not
+				// gameplay - a pause, a rejoin, somebody walking away during the
+				// end screen. Reach back only as far as a round can actually be.
+				span.Start = r.mod.Add(-maxRoundSeconds * time.Second)
+			case length < minRoundSeconds*time.Second:
+				// Two replay files flushed close together. Keep a floor so the
+				// clip is not a fraction of a second long.
+				span.Start = r.mod.Add(-minRoundSeconds * time.Second)
+			default:
+				span.Start = candidate
+			}
+		}
+
+		span.ActionStart = span.Start.Add(prepPhaseSeconds * time.Second)
+		if !span.ActionStart.Before(span.End) {
+			// A round shorter than the prep phase means the estimate is off, or
+			// somebody surrendered. Treating the whole thing as action is the
+			// honest fallback - better a slightly long clip than an empty one.
+			span.ActionStart = span.Start
+		}
+
+		plan.Rounds = append(plan.Rounds, span)
+	}
+	return plan
+}
+
+// applyEvents overlays decoded per-round detail from the backend onto an
+// estimated plan. Rounds the backend has real boundaries for become Exact;
+// rounds it does not mention keep their estimate. A partial answer improves the
+// rounds it covers and leaves the rest honestly labelled.
+func (p *matchPlan) applyEvents(ev *matchEvents) {
+	if ev == nil || len(ev.Rounds) == 0 {
+		return
+	}
+	p.Events = ev
+
+	anyEstimate := false
+	for i := range p.Rounds {
+		e, ok := p.eventFor(p.Rounds[i].Index)
+		if !ok || e.StartBeforeEndSec <= 0 {
+			anyEstimate = true
+			continue
+		}
+		end := p.Rounds[i].End
+		p.Rounds[i].Start = end.Add(-time.Duration(e.StartBeforeEndSec * float64(time.Second)))
+		if e.ActionBeforeEndSec > 0 {
+			p.Rounds[i].ActionStart = end.Add(-time.Duration(e.ActionBeforeEndSec * float64(time.Second)))
+		} else {
+			p.Rounds[i].ActionStart = p.Rounds[i].Start.Add(prepPhaseSeconds * time.Second)
+		}
+		p.Rounds[i].Exact = true
+	}
+	p.Estimate = anyEstimate
+}

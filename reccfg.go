@@ -1,0 +1,348 @@
+// reccfg.go - the recorder's settings: WHEN it records, WHAT it keeps, and
+// WHERE finished clips go.
+//
+// The single most important idea in the recorder is that "when it records" and
+// "what it keeps" are two separate dials, not one.
+//
+// The rolling buffer has to be running before a round starts, because Siege
+// only writes the .rec replay file AFTER the round has already ended. Anything
+// that was not buffered is gone forever - no amount of cleverness recovers it.
+// So Mode controls when the buffer is allowed to spin up at all, and KeepRule
+// controls what survives out of that buffer once the replay lands and we can
+// finally see what happened.
+//
+// That split is also the thing a generic recorder cannot copy. Medal, OBS and
+// ShadowPlay all keep a rolling buffer too, but none of them can read the match
+// file, so none of them can answer "keep only the rounds I died in". We can.
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// Mode - when the rolling buffer is allowed to run.
+const (
+	ModeOff          = "off"           // recorder disabled entirely
+	ModeSiegeRunning = "siege_running" // buffer whenever Siege is running (default)
+	ModeTournament   = "tournament"    // buffer only during a SiegeIQ tournament match
+	ModeManual       = "manual"        // buffer only while the player has armed it from the tray
+)
+
+// KeepRule - what is retained out of the buffer once a match's replay files land.
+//
+// Rules marked "needs events" require per-round detail (who died, who got a
+// kill, who was last alive) that only the backend's decoded replay data can
+// supply. When that detail is unavailable the rule degrades to the whole round
+// and says so in the log. It never guesses.
+const (
+	KeepWholeMatch  = "whole_match"  // everything from first round start to last round end
+	KeepActionOnly  = "action_only"  // drop the prep phase from each round
+	KeepMyDeaths    = "my_deaths"    // needs events: rounds where the uploader died
+	KeepMyKills     = "my_kills"     // needs events: rounds where the uploader got a kill
+	KeepClutches    = "clutches"     // needs events: rounds the uploader ended as last alive
+	KeepLastSeconds = "last_seconds" // the final N seconds of each round
+	KeepNothing     = "nothing"      // buffer only; the player saves moments by hand
+)
+
+// Destination for a finished clip beyond the local folder.
+const (
+	SendOff  = "off"  // stays on disk, player uploads by hand if they want to
+	SendAsk  = "ask"  // a tray notification offers to send it to AI Analyze
+	SendAuto = "auto" // goes straight to AI Analyze
+)
+
+// recorderConfig is persisted inside config.json under "recorder". Every field
+// has a working default, so an existing install that has never seen this
+// version gets a sane recorder the first time it starts.
+type recorderConfig struct {
+	Mode     string `json:"mode"`
+	KeepRule string `json:"keep_rule"`
+
+	// Trim shaping, in seconds.
+	LastSeconds int `json:"last_seconds"` // for KeepLastSeconds
+	PrePadSec   int `json:"pre_pad_sec"`  // extra footage kept before a span
+	PostPadSec  int `json:"post_pad_sec"` // extra footage kept after a span
+
+	// Capture quality. HeightCap of 1080 downscales a 1440p or 4K game to 1080p,
+	// which is where the AI Analyze pipeline stops gaining from extra pixels
+	// anyway (see the July clip-quality work) and roughly quarters the file size.
+	FPS       int    `json:"fps"`
+	HeightCap int    `json:"height_cap"`
+	Encoder   string `json:"encoder"` // "auto" | "nvenc" | "amf" | "qsv" | "cpu"
+	Quality   int    `json:"quality"` // CRF/CQ, lower is better. 23 is a sane default.
+
+	// MaxMbps is a ceiling on how fat the video may get, in megabits per second.
+	//
+	// THIS EXISTS BECAUSE QUALITY-ONLY ENCODING HAS NO CEILING. The first real
+	// clip recorded by this app was 310 MB for 105 seconds - 23 Mbps - because
+	// NVENC was told to hit a quality target and given no limit, and a busy
+	// Siege scene will happily spend whatever it is allowed. At that rate an
+	// evening of play fills the clip budget, and sending a clip anywhere becomes
+	// impractical. Zero means "work it out from the resolution and frame rate".
+	MaxMbps int `json:"max_mbps"`
+
+	// AudioOff switches game sound OFF, and the polarity is the entire point.
+	//
+	// This shipped as `Audio bool` defaulting to true, and it was dead on arrival
+	// for every existing install. normalise() fixes numbers and strings, but a
+	// missing bool in JSON unmarshals to false and there is no way to tell that
+	// apart from a deliberate false - so the default of true never applied to
+	// anyone who already had a config file, and the app reported "game sound is
+	// switched off in settings" to somebody who had never touched the setting.
+	//
+	// config.go already states this convention for the notification switches:
+	// store the OFF state, so an absent key means ON. Same fix, same reason.
+	//
+	// AudioDevice names the DirectShow input; empty means "find one".
+	//
+	// FFmpeg cannot record a Windows playback device. Its only Windows audio
+	// input is DirectShow, which enumerates CAPTURE devices. So recording game
+	// sound depends on a capture device that happens to carry the output mix,
+	// usually called Stereo Mix, and whether one exists is a fact about the
+	// machine. See audio_windows.go.
+	AudioOff    bool   `json:"audio_off,omitempty"`
+	AudioDevice string `json:"audio_device,omitempty"`
+
+	// Disk budgets. The buffer is a hard cap the recorder enforces itself by
+	// pruning its oldest segments; it never grows past this.
+	BufferMinutes int `json:"buffer_minutes"`
+	BufferDiskMB  int `json:"buffer_disk_mb"`
+
+	// SettingsRev is how a shipped default reaches an install that already
+	// exists.
+	//
+	// normalise() cannot do this job and it is worth being clear about why. It
+	// only replaces values that are OUT OF RANGE, so a config saying quality 23
+	// and a twelve minute buffer is left completely alone - both are perfectly
+	// legal numbers. That is correct behaviour and it also means every existing
+	// install would keep recording soft footage and losing the first half of
+	// every ranked match forever, no matter what the defaults said.
+	//
+	// So: an absent or older revision gets the new capture defaults applied
+	// once, and the revision is stamped so it never happens twice. It is logged
+	// when it happens, because silently rewriting somebody's settings without
+	// telling them is not a thing this app should do.
+	SettingsRev int `json:"settings_rev,omitempty"`
+	ClipDiskMB    int `json:"clip_disk_mb"`
+	ClipKeepDays  int `json:"clip_keep_days"`
+
+	// Paths. Empty means "work it out", which is what happens on a fresh install.
+	ClipDir    string `json:"clip_dir"`
+	FFmpegPath string `json:"ffmpeg_path"`
+
+	// Destinations.
+	SendToAI             string `json:"send_to_ai"`
+	AutoUploadTournament bool   `json:"auto_upload_tournament"`
+
+	// Capture plumbing. Backend is deliberately a string so a native
+	// Windows.Graphics.Capture backend can be selected later without a schema
+	// change. MonitorIndex of -1 means "follow the Siege window".
+	CaptureBackend string `json:"capture_backend"`
+	MonitorIndex   int    `json:"monitor_index"`
+
+	// Adapter is which graphics chip is asked for the screen contents.
+	// -1 means "let the system choose", which is right on a desktop with one
+	// graphics card and WRONG on a laptop with switchable graphics: there the
+	// screen is usually driven by the built-in chip while the separate GPU does
+	// the work, and asking the wrong one returns no picture at all with no error
+	// worth reading. The capture self-test finds the right number.
+	Adapter int `json:"adapter"`
+
+	// CaptureMethod pins how frames are grabbed.
+	//   auto     - try the fast GPU path, fall back on its own
+	//   ddagrab  - force the fast GPU path
+	//   gdigrab  - force the slower window-capture path, which needs no GPU
+	//              cooperation at all and is the one that works when nothing else does
+	CaptureMethod string `json:"capture_method"`
+}
+
+// defaultRecorderConfig is what a fresh install gets: buffering while Siege is
+// running, keeping the action phase of every round, 1080p60, nothing uploaded
+// anywhere without the player saying so.
+func defaultRecorderConfig() recorderConfig {
+	return recorderConfig{
+		Mode:     ModeSiegeRunning,
+		KeepRule: KeepActionOnly,
+
+		LastSeconds: 30,
+		PrePadSec:   6,
+		PostPadSec:  4,
+
+		FPS:       60,
+		HeightCap: 1440,
+		Encoder:   "auto",
+		Quality:   19,
+		MaxMbps:   0, // 0 = derived from resolution and frame rate, see bitrateCapKbps
+
+		BufferMinutes: 45,
+		BufferDiskMB:  8192,
+		ClipDiskMB:    20480,
+		ClipKeepDays:  14,
+
+		SendToAI:             SendAsk,
+		AutoUploadTournament: true,
+
+		CaptureBackend: "ffmpeg",
+		MonitorIndex:   -1,
+		Adapter:        -1,
+		CaptureMethod:  "auto",
+	}
+}
+
+// normalise fills in anything missing or nonsensical. It is called every time
+// the config is loaded, so a hand-edited config.json with one bad value degrades
+// to the default for that value rather than breaking the recorder.
+// currentSettingsRev is bumped whenever a shipped default must reach installs
+// that already exist. See SettingsRev.
+//
+//	rev 1  the capture quality pass of 0.9.0: 1440p, CQ 19, 45 minute buffer.
+const currentSettingsRev = 1
+
+// migrate brings an older config up to the current shipped defaults for the
+// handful of fields where the old value is not wrong, just worse.
+//
+// It deliberately touches ONLY capture quality and buffer length. Modes, keep
+// rules, destinations and sound choices are decisions the player made about how
+// they want the app to behave, and a version bump is not a licence to overrule
+// them.
+func (rc *recorderConfig) migrate() {
+	if rc.SettingsRev >= currentSettingsRev {
+		return
+	}
+	d := defaultRecorderConfig()
+	before := fmt.Sprintf("%dp CQ%d %dmin/%dMB",
+		rc.HeightCap, rc.Quality, rc.BufferMinutes, rc.BufferDiskMB)
+
+	rc.HeightCap = d.HeightCap
+	rc.Quality = d.Quality
+	if rc.BufferMinutes < d.BufferMinutes {
+		rc.BufferMinutes = d.BufferMinutes
+	}
+	if rc.BufferDiskMB < d.BufferDiskMB {
+		rc.BufferDiskMB = d.BufferDiskMB
+	}
+	rc.SettingsRev = currentSettingsRev
+
+	logf("recorder: updated your capture settings from %s to %dp CQ%d %dmin/%dMB - "+
+		"sharper footage and a buffer long enough to hold a whole ranked match. "+
+		"Change them back in the app window if you would rather have smaller files.",
+		before, rc.HeightCap, rc.Quality, rc.BufferMinutes, rc.BufferDiskMB)
+}
+
+func (rc *recorderConfig) normalise() {
+	d := defaultRecorderConfig()
+	rc.migrate()
+
+	switch rc.Mode {
+	case ModeOff, ModeSiegeRunning, ModeTournament, ModeManual:
+	default:
+		rc.Mode = d.Mode
+	}
+
+	switch rc.KeepRule {
+	case KeepWholeMatch, KeepActionOnly, KeepMyDeaths, KeepMyKills,
+		KeepClutches, KeepLastSeconds, KeepNothing:
+	default:
+		rc.KeepRule = d.KeepRule
+	}
+
+	switch rc.SendToAI {
+	case SendOff, SendAsk, SendAuto:
+	default:
+		rc.SendToAI = d.SendToAI
+	}
+
+	switch rc.Encoder {
+	case "auto", "nvenc", "amf", "qsv", "cpu":
+	default:
+		rc.Encoder = d.Encoder
+	}
+
+	if rc.CaptureBackend == "" {
+		rc.CaptureBackend = d.CaptureBackend
+	}
+	if rc.LastSeconds <= 0 {
+		rc.LastSeconds = d.LastSeconds
+	}
+	if rc.PrePadSec < 0 {
+		rc.PrePadSec = d.PrePadSec
+	}
+	if rc.PostPadSec < 0 {
+		rc.PostPadSec = d.PostPadSec
+	}
+	if rc.FPS < 15 || rc.FPS > 240 {
+		rc.FPS = d.FPS
+	}
+	if rc.HeightCap < 480 {
+		rc.HeightCap = d.HeightCap
+	}
+	if rc.MaxMbps < 0 || rc.MaxMbps > 200 {
+		rc.MaxMbps = d.MaxMbps
+	}
+	if rc.Quality < 1 || rc.Quality > 51 {
+		rc.Quality = d.Quality
+	}
+	if rc.BufferMinutes < 2 {
+		rc.BufferMinutes = d.BufferMinutes
+	}
+	if rc.BufferDiskMB < 512 {
+		rc.BufferDiskMB = d.BufferDiskMB
+	}
+	if rc.ClipDiskMB < 512 {
+		rc.ClipDiskMB = d.ClipDiskMB
+	}
+	if rc.ClipKeepDays < 1 {
+		rc.ClipKeepDays = d.ClipKeepDays
+	}
+	if rc.MonitorIndex < -1 {
+		rc.MonitorIndex = -1
+	}
+	if rc.Adapter < -1 {
+		rc.Adapter = -1
+	}
+	switch rc.CaptureMethod {
+	case "auto", "ddagrab", "gdigrab":
+	default:
+		rc.CaptureMethod = d.CaptureMethod
+	}
+	if rc.ClipDir == "" {
+		rc.ClipDir = defaultClipDir()
+	}
+}
+
+// needsEvents reports whether the chosen keep rule depends on decoded per-round
+// detail from the backend. Used to decide whether to bother asking for it, and
+// to explain a degrade honestly in the log.
+func (rc recorderConfig) needsEvents() bool {
+	switch rc.KeepRule {
+	case KeepMyDeaths, KeepMyKills, KeepClutches:
+		return true
+	}
+	return false
+}
+
+// defaultClipDir puts finished clips somewhere a player will actually find them:
+// Videos\SiegeIQ. Falls back to the config directory if the Videos folder is not
+// where it should be.
+func defaultClipDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		vids := filepath.Join(home, "Videos")
+		if st, err := os.Stat(vids); err == nil && st.IsDir() {
+			return filepath.Join(vids, "SiegeIQ")
+		}
+	}
+	return filepath.Join(configDir(), "clips")
+}
+
+// bufferDir is the scratch area the rolling buffer writes segments into. It sits
+// under the clip directory so a player who moves clips to another drive moves
+// the buffer with it, and it is safe to delete at any time.
+func (rc recorderConfig) bufferDir() string {
+	return filepath.Join(rc.ClipDir, ".buffer")
+}
+
+// AudioWanted is the positive form, so callers read the way people think while
+// the stored field keeps the absent-means-on polarity.
+func (rc recorderConfig) AudioWanted() bool { return !rc.AudioOff }

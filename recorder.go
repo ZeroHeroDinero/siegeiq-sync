@@ -1,0 +1,732 @@
+// recorder.go - the orchestrator. Decides when the buffer runs, notices when
+// Siege's window changes underneath it, and turns a finished match into clips.
+//
+// # INDEPENDENT OF SYNC, ON PURPOSE
+//
+// The recorder never looks at the sync pause flag, and the sync watcher never
+// waits on the recorder. Four combinations are all valid and all supported:
+//
+//	sync on,  recorder on   - replays upload, footage is kept
+//	sync on,  recorder off  - exactly how Sync behaved before this existed
+//	sync off, recorder on   - footage is kept, nothing is uploaded at all
+//	sync off, recorder off  - the app sits in the tray doing nothing
+//
+// The recorder-on/sync-off case is the one that needs care, and it works because
+// cutting footage on round boundaries only needs the .rec files' TIMESTAMPS,
+// which are read off the local disk. Nothing has to be uploaded, parsed
+// server-side, or even opened for the recorder to do its job.
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// recorderPaused is the recorder's own switch, separate from the sync pause.
+var recorderPaused int32
+
+const (
+	recorderTick    = 5 * time.Second  // how often we re-check Siege and the window
+	prunePeriod     = 60 * time.Second // how often the buffer budget is enforced
+	geometrySlack   = 8                // pixels of change tolerated before restarting
+	postMatchSettle = 3 * time.Second  // let the last segment flush before trimming
+)
+
+type recorder struct {
+	mu sync.Mutex
+
+	cfg *config
+	rc  recorderConfig
+
+	session captureSession
+	spec    captureSpec
+
+	armed            bool // ModeManual: the player has explicitly armed it
+	tournamentActive bool // ModeTournament: a SiegeIQ tournament match is live
+
+	status   string
+	statusFn func(string)
+
+	lastPrune  time.Time
+	lastReason string
+
+	// Consecutive capture failures, and when the next attempt is allowed.
+	//
+	// THIS EXISTS BECAUSE OF A REAL INCIDENT. The first version restarted
+	// capture every five seconds whenever it stopped unexpectedly, and never
+	// considered that it might fail INSTANTLY AND FOREVER. On a machine where
+	// the screen grab could not work at all, that launched several hundred
+	// ffmpeg processes over forty minutes, burning CPU the whole time, while the
+	// interface cheerfully said "Recording". Retrying without a ceiling is not
+	// resilience, it is a denial of service against your own user.
+	failures  int
+	nextTry   time.Time
+	gaveUp    bool
+	lastError string
+
+	// When the current capture session started. A session that ran for a good
+	// while and THEN died is a different animal from one that died on launch,
+	// and telling them apart is what stops a healthy recorder being condemned
+	// by three unrelated hiccups spread across an evening. See noteFailure.
+	captureStarted time.Time
+
+	// The stall watchdog's memory: how large the buffer was last time it grew,
+	// and when that was. See capture_watchdog.go. Without these the app had no
+	// way to tell a recorder that was working from one that was running and
+	// producing nothing, and reported the second as the first.
+	// bufWroteAt is the newest modification time seen in the buffer folder, and
+	// bufGrewAt is when that last changed. This was a byte COUNT until it
+	// silently became wrong: a full buffer stops growing by design, because
+	// pruning removes as much as capture adds, so "not getting bigger" started
+	// meaning "healthy" rather than "dead". See capture_watchdog.go.
+	bufWroteAt time.Time
+	bufGrewAt  time.Time
+
+	// saidFullscreen stops the exclusive-fullscreen advice repeating every
+	// minute. Said once per session is help; said sixty times an hour is noise
+	// somebody turns notifications off to escape.
+	saidFullscreen bool
+
+	// siegeWasRunning tracks the last tick's answer, so a fresh launch of the
+	// game can clear a give-up state. Somebody who quits Siege, changes their
+	// display mode and comes back should not have to find a button in this app
+	// before it will try again.
+	siegeWasRunning bool
+}
+
+// maxCaptureFailures is how many times capture may fail before the recorder
+// stops trying and says so plainly. Three is enough to ride out a transient
+// blip - a display mode change, a driver reset - and few enough that a
+// genuinely broken configuration is caught in fifteen seconds rather than
+// forty minutes.
+const maxCaptureFailures = 3
+
+var rec = &recorder{}
+
+// configure hands the recorder the loaded config. Safe to call again when
+// settings change from the tray.
+func (r *recorder) configure(cfg *config) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cfg = cfg
+	r.rc = cfg.Recorder
+	r.rc.normalise()
+	cfg.Recorder = r.rc
+}
+
+func (r *recorder) setStatusFn(fn func(string)) {
+	r.mu.Lock()
+	r.statusFn = fn
+	r.mu.Unlock()
+}
+
+func (r *recorder) setStatus(format string, a ...any) {
+	s := fmt.Sprintf(format, a...)
+	r.mu.Lock()
+	changed := r.status != s
+	r.status = s
+	fn := r.statusFn
+	r.mu.Unlock()
+	if changed && fn != nil {
+		fn(s)
+	}
+}
+
+func (r *recorder) currentStatus() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.status == "" {
+		return "Recorder idle"
+	}
+	return r.status
+}
+
+func (r *recorder) settings() recorderConfig {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rc
+}
+
+// noteFailure records a failed capture and applies increasing backoff, so a
+// broken configuration costs a handful of attempts rather than an evening.
+// healthyCaptureSeconds is how long a capture must survive to count as having
+// worked. ddagrab loses the desktop duplication for reasons that have nothing
+// to do with configuration - the game switching to fullscreen, a resolution
+// change, alt-tabbing, a driver reset - and each of those looked identical to
+// "this PC cannot capture" to the old counter. A session that ran for a minute
+// demonstrably CAN capture, so its death resets the count rather than adding
+// to it.
+const healthyCaptureSeconds = 60
+
+// The smallest window worth recording. Comfortably below any real playing
+// resolution and comfortably above the launcher and loading windows that carry
+// the same process name.
+const (
+	minPlayableWidth  = 1024
+	minPlayableHeight = 600
+)
+
+func (r *recorder) noteFailure(err error) {
+	r.mu.Lock()
+	if !r.captureStarted.IsZero() && time.Since(r.captureStarted) >= healthyCaptureSeconds*time.Second {
+		ran := time.Since(r.captureStarted).Round(time.Second)
+		r.captureStarted = time.Time{}
+		r.failures = 0
+		r.nextTry = time.Now().Add(3 * time.Second)
+		if err != nil {
+			r.lastError = err.Error()
+		}
+		r.mu.Unlock()
+		logf("recorder: capture ran %s before stopping - treating this as a hiccup, not a fault, and restarting", ran)
+		return
+	}
+	r.captureStarted = time.Time{}
+	r.failures++
+	if err != nil {
+		r.lastError = err.Error()
+	}
+	n := r.failures
+	// 5s, 10s, 20s, then stop.
+	r.nextTry = time.Now().Add(time.Duration(5*(1<<uint(n-1))) * time.Second)
+	if n >= maxCaptureFailures {
+		r.gaveUp = true
+	}
+	gave := r.gaveUp
+	r.mu.Unlock()
+
+	if gave {
+		logf("recorder: capture has failed %d times in a row - giving up until you run the capture test or change a setting", n)
+		r.setStatus("Recording is not working on this PC - run the capture test")
+		notifyClipFailed("The recorder could not capture your screen.")
+	} else {
+		logf("recorder: capture failed (%d of %d) - backing off", n, maxCaptureFailures)
+	}
+}
+
+// clearFailures re-arms the recorder. Called when settings change or the
+// self-test finds something that works, because both are real reasons to
+// believe the next attempt will go differently.
+func (r *recorder) clearFailures() {
+	r.mu.Lock()
+	r.failures = 0
+	r.gaveUp = false
+	r.lastError = ""
+	r.nextTry = time.Time{}
+	r.captureStarted = time.Time{}
+	r.mu.Unlock()
+}
+
+// captureTrouble reports whether the recorder has stopped trying, and why.
+func (r *recorder) captureTrouble() (bool, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gaveUp, r.lastError
+}
+
+// setMode changes when the buffer is allowed to run, and persists it.
+func (r *recorder) setMode(mode string) {
+	r.mu.Lock()
+	r.rc.Mode = mode
+	r.rc.normalise()
+	if r.cfg != nil {
+		r.cfg.Recorder = r.rc
+		saveJSON(configPath(), r.cfg)
+	}
+	r.mu.Unlock()
+	r.clearFailures()
+	logf("recorder: mode set to %s", mode)
+	if mode == ModeOff {
+		r.stopCapture("recorder switched off")
+		clearBuffer(r.settings().bufferDir())
+	}
+}
+
+// setKeepRule changes what survives out of the buffer, and persists it.
+func (r *recorder) setKeepRule(rule string) {
+	r.mu.Lock()
+	r.rc.KeepRule = rule
+	r.rc.normalise()
+	if r.cfg != nil {
+		r.cfg.Recorder = r.rc
+		saveJSON(configPath(), r.cfg)
+	}
+	r.mu.Unlock()
+	logf("recorder: keep rule set to %s", rule)
+}
+
+func (r *recorder) setArmed(on bool) {
+	r.mu.Lock()
+	r.armed = on
+	r.mu.Unlock()
+	logf("recorder: %s", map[bool]string{true: "armed", false: "disarmed"}[on])
+}
+
+// isArmed is read by the app window so the button can say what it will do
+// rather than what it is called.
+func (r *recorder) isArmed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.armed
+}
+
+// shouldCapture answers the only question the tick loop really cares about.
+func (r *recorder) shouldCapture() (bool, string) {
+	if atomic.LoadInt32(&recorderPaused) == 1 {
+		return false, "recorder paused"
+	}
+	rc := r.settings()
+	switch rc.Mode {
+	case ModeOff:
+		return false, "recorder off"
+	case ModeManual:
+		r.mu.Lock()
+		armed := r.armed
+		r.mu.Unlock()
+		if !armed {
+			return false, "waiting to be armed"
+		}
+	case ModeTournament:
+		r.mu.Lock()
+		live := r.tournamentActive
+		r.mu.Unlock()
+		if !live {
+			return false, "waiting for a tournament match"
+		}
+	}
+	if !siegeRunning() {
+		return false, "Siege is not running"
+	}
+	return true, ""
+}
+
+// run is the recorder's own loop. It is started once, alongside the sync watch
+// loop, and the two never block each other.
+func (r *recorder) run() {
+	logf("recorder: started (backends: %v)", captureBackendNames())
+
+	// Ask ffmpeg what it can do ONCE, here, in the background. Nothing that the
+	// app window polls is ever allowed to do this itself - see the long note in
+	// capture_ffmpeg.go about the bridge jam it caused.
+	warmCaptureCaps(r.settings())
+	warmAudio(r.settings())
+	for {
+		r.tick()
+		time.Sleep(recorderTick)
+	}
+}
+
+func (r *recorder) tick() {
+	rc := r.settings()
+
+	// Budget enforcement runs whether or not we are capturing, so a buffer left
+	// behind by a crash still gets cleaned up.
+	if time.Since(r.lastPrune) > prunePeriod {
+		r.lastPrune = time.Now()
+		pruneBuffer(rc.bufferDir(),
+			time.Duration(rc.BufferMinutes)*time.Minute,
+			int64(rc.BufferDiskMB)*1024*1024)
+
+		// Keep a readable copy of the log where the clips are. Every diagnosis
+		// so far has started by asking somebody to go and find a file in
+		// %APPDATA%, and the folder they already have open is a better place
+		// for the answer to "why is there no footage".
+		dumpDiagnostics(rc.ClipDir)
+	}
+
+	// Siege starting is a reason to try again, and until now it was not.
+	//
+	// The give-up state was only cleared by changing a setting or running the
+	// self-test, which means somebody who hit it, quit the game, changed their
+	// display mode and came back found an app that had quietly decided this PC
+	// could not record and was not going to check again. Launching the game is
+	// the most likely moment for the thing that was wrong to have been fixed,
+	// so it is the right moment to give it another go.
+	nowRunning := siegeRunning()
+	if nowRunning && !r.siegeWasRunning {
+		r.mu.Lock()
+		wasStuck := r.gaveUp
+		r.saidFullscreen = false
+		r.mu.Unlock()
+		if wasStuck {
+			logf("recorder: Siege has started, so trying capture again from scratch")
+			r.clearFailures()
+		}
+	}
+	r.siegeWasRunning = nowRunning
+
+	// A recorder that has given up stays given up until something changes.
+	// It still reports itself honestly; it just stops burning the machine.
+	if gave, lastErr := r.captureTrouble(); gave {
+		if r.lastReason != "gaveup" {
+			r.lastReason = "gaveup"
+			short := lastErr
+			if len(short) > 120 {
+				short = short[:120] + "..."
+			}
+			logf("recorder: not retrying capture. Last error: %s", short)
+		}
+		return
+	}
+
+	r.mu.Lock()
+	next := r.nextTry
+	r.mu.Unlock()
+	if !next.IsZero() && time.Now().Before(next) {
+		return
+	}
+
+	want, why := r.shouldCapture()
+	if !want {
+		if r.capturing() {
+			r.stopCapture(why)
+		}
+		if why != r.lastReason {
+			r.lastReason = why
+			r.setStatus("Recorder: %s", why)
+		}
+		return
+	}
+	r.lastReason = ""
+
+	// A session that died on its own - a driver reset, a display change ffmpeg
+	// could not follow - is restarted rather than left silently dead.
+	r.mu.Lock()
+	sess := r.session
+	r.mu.Unlock()
+	if sess != nil && !sess.Running() {
+		err := sess.Wait()
+		if err != nil {
+			logf("recorder: capture stopped unexpectedly: %v", err)
+		}
+		r.stopCapture("after an unexpected stop")
+		r.noteFailure(err)
+		return
+	}
+
+	monitor, _, crop, title, err := siegeGeometry()
+	if err != nil {
+		if r.capturing() {
+			r.stopCapture("lost the Siege window")
+		}
+		r.setStatus("Recorder: waiting for the Siege window")
+		return
+	}
+	if rc.MonitorIndex >= 0 {
+		monitor = rc.MonitorIndex
+	}
+
+	// Siege's window exists before the game does. On the first real recorded
+	// match it was 700x400 in the corner of the screen for a minute and a half
+	// while the launcher sat there, and the recorder dutifully captured it. Had
+	// a round ended in that window the clip would have been a 700x400 postage
+	// stamp of a loading screen. Anything this small is not gameplay, so wait.
+	if crop.valid() && (crop.W < minPlayableWidth || crop.H < minPlayableHeight) {
+		if r.capturing() {
+			r.stopCapture("the Siege window shrank below playable size")
+		}
+		r.setStatus("Recorder: waiting for Siege to finish loading")
+		return
+	}
+
+	if r.capturing() {
+		// Resolution or monitor changed under us: restart so the recording does
+		// not silently continue capturing the wrong rectangle.
+		r.mu.Lock()
+		old := r.spec
+		r.mu.Unlock()
+		if old.MonitorIndex != monitor ||
+			absInt(old.Crop.W-crop.W) > geometrySlack ||
+			absInt(old.Crop.H-crop.H) > geometrySlack ||
+			absInt(old.Crop.X-crop.X) > geometrySlack ||
+			absInt(old.Crop.Y-crop.Y) > geometrySlack {
+			logf("recorder: Siege window changed (%s -> %s), restarting capture", old.Crop, crop)
+			r.stopCapture("window changed")
+		} else {
+			// Capturing the right rectangle. That is NOT the same as capturing,
+			// and this is the check that tells the two apart.
+			r.watchProgress(rc)
+			return
+		}
+	}
+
+	spec := captureSpec{
+		MonitorIndex: monitor,
+		WindowTitle:  title,
+		Crop:         crop,
+		FPS:          rc.FPS,
+		HeightCap:    rc.HeightCap,
+		Encoder:      rc.Encoder,
+		Quality:      rc.Quality,
+		SegmentDir:   rc.bufferDir(),
+		SegmentSecs:  10,
+	}
+	r.startCapture(spec, rc)
+}
+
+func (r *recorder) capturing() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.session != nil && r.session.Running()
+}
+
+func (r *recorder) startCapture(spec captureSpec, rc recorderConfig) {
+	backend, note, err := pickCaptureBackend(rc)
+	if err != nil {
+		r.setStatus("Recorder: %v", err)
+		logf("recorder: cannot start - %v", err)
+		return
+	}
+	if note != "" {
+		logf("recorder: %s", note)
+	}
+
+	sess, err := backend.Start(spec, rc)
+	if err != nil {
+		r.setStatus("Recorder: could not start capture")
+		logf("recorder: capture failed to start: %v", err)
+		r.noteFailure(err)
+		return
+	}
+
+	r.mu.Lock()
+	r.session = sess
+	r.spec = spec
+	r.captureStarted = time.Now()
+	r.mu.Unlock()
+
+	// Start the stall clock from this session's own baseline. Carrying the
+	// previous session's byte count forward would let a dead session's numbers
+	// vouch for a live one.
+	r.resetProgress(spec.SegmentDir)
+
+	r.setStatus("Recording (%dx%d)", spec.Crop.W, spec.Crop.H)
+}
+
+func (r *recorder) stopCapture(why string) {
+	r.mu.Lock()
+	sess := r.session
+	r.session = nil
+	r.mu.Unlock()
+	if sess == nil {
+		return
+	}
+	logf("recorder: stopping capture - %s", why)
+	_ = sess.Stop()
+}
+
+// handleMatch is called by the sync watch loop the moment a match folder has
+// settled - the same trigger that decides a match is ready to upload. It runs on
+// its own goroutine so trimming never delays an upload, and vice versa.
+//
+// It is called whether or not uploading is paused, which is what makes
+// recorder-on/sync-off work.
+func (r *recorder) handleMatch(matchFolder string, files []string) {
+	rc := r.settings()
+	if rc.Mode == ModeOff || rc.KeepRule == KeepNothing {
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+
+	go func() {
+		// Let ffmpeg finish the segment that contains the end of the last round
+		// before we go looking for footage in it.
+		time.Sleep(postMatchSettle)
+
+		plan := planMatch(matchFolder, files)
+		if len(plan.Rounds) == 0 {
+			return
+		}
+
+		// Siege keeps a dozen past matches on disk, so the very first scan after
+		// an install sees a folder full of history. None of it can possibly be in
+		// the buffer, and trying to cut it would fill the log with failures for
+		// matches the player played last week. Anything that ended before the
+		// buffer could have reached is skipped in silence.
+		lastEnd := plan.Rounds[len(plan.Rounds)-1].End
+		if time.Since(lastEnd) > time.Duration(rc.BufferMinutes)*time.Minute {
+			return
+		}
+
+		spans, notes := evaluateKeepRule(plan, rc)
+		for _, n := range notes {
+			logf("recorder: %s", n)
+		}
+		if len(spans) == 0 {
+			return
+		}
+
+		from, to, _ := plan.span()
+		if bf, bt, ok := bufferSpan(rc.bufferDir()); ok {
+			if from.Before(bf) {
+				logf("recorder: part of this match is older than the buffer (buffer starts %s, match starts %s) - clips will be shorter",
+					bf.Format("15:04:05"), from.Format("15:04:05"))
+			}
+			_ = bt
+		} else {
+			logf("recorder: nothing in the buffer for this match - was the recorder running?")
+			return
+		}
+		_ = to
+
+		outDir := clipDirFor(rc, filepath.Base(matchFolder), plan.Rounds[0].End)
+		made := 0
+
+		for _, span := range spans {
+			out := filepath.Join(outDir, clipFileName(span.From, span.Label))
+			res, err := trimSpan(rc, span, out)
+			if err != nil {
+				logf("recorder: could not cut %s: %v", span.Label, err)
+				continue
+			}
+			made++
+
+			meta := clipMeta{
+				CreatedAt:           time.Now(),
+				MatchFolder:         filepath.Base(matchFolder),
+				RoundIndex:          span.RoundIndex,
+				Label:               span.Label,
+				Reason:              span.Reason,
+				KeepRule:            rc.KeepRule,
+				SpanFrom:            span.From,
+				SpanTo:              span.To,
+				DurationSec:         res.Duration.Seconds(),
+				BoundariesEstimated: span.Estimated,
+				Gaps:                res.Gaps,
+				Notes:               notes,
+				FPS:                 rc.FPS,
+			}
+			r.mu.Lock()
+			meta.Width, meta.Height = r.spec.Crop.W, r.spec.Crop.H
+			r.mu.Unlock()
+			if sessBackend := r.backendName(); sessBackend != "" {
+				meta.CaptureBackend = sessBackend
+			}
+			writeClipMeta(out, meta)
+
+			r.maybeUpload(out, filepath.Base(matchFolder))
+		}
+
+		if made > 0 {
+			logf("recorder: wrote %d clip(s) to %s", made, outDir)
+			r.setStatus("Saved %d clip(s)", made)
+			notifyClipsSaved(made, outDir)
+		}
+		pruneClips(rc)
+	}()
+}
+
+func (r *recorder) backendName() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.session == nil {
+		return ""
+	}
+	return r.session.Backend()
+}
+
+// maybeUpload sends a clip onward if - and only if - the player's settings say
+// to. The default is SendAsk, which uploads nothing and puts a notification up
+// instead.
+func (r *recorder) maybeUpload(clipPath, matchFolder string) {
+	rc := r.settings()
+	r.mu.Lock()
+	cfg := r.cfg
+	tournament := r.tournamentActive
+	r.mu.Unlock()
+	if cfg == nil {
+		return
+	}
+
+	kind := ""
+	switch {
+	case tournament && rc.AutoUploadTournament:
+		kind = clipKindTournament
+	case rc.SendToAI == SendAuto:
+		kind = clipKindAI
+	}
+	if kind == "" {
+		return
+	}
+	if clipEndpointKnownMissing() {
+		return
+	}
+
+	go func() {
+		done, err := uploadClip(cfg, rc, clipPath, kind, matchFolder)
+		switch {
+		case err == nil:
+			logf("recorder: sent %s to SiegeIQ (%s)", filepath.Base(clipPath), kind)
+		case done:
+			logf("recorder: not sending %s - %v", filepath.Base(clipPath), err)
+		default:
+			logf("recorder: upload of %s failed, clip kept on disk - %v", filepath.Base(clipPath), err)
+		}
+	}()
+}
+
+// saveLast is the manual escape hatch: write out the last N of whatever is in
+// the buffer right now, with no reference to rounds at all. This is the "that
+// was insane, keep it" button, and it is the one thing a generic recorder does
+// well that we must not be worse at.
+func (r *recorder) saveLast(d time.Duration) (string, error) {
+	rc := r.settings()
+	to := time.Now()
+	from := to.Add(-d)
+
+	if bf, _, ok := bufferSpan(rc.bufferDir()); !ok {
+		return "", fmt.Errorf("there is nothing in the buffer yet")
+	} else if from.Before(bf) {
+		from = bf
+	}
+
+	span := keepSpan{
+		Label:     fmt.Sprintf("manual-%dm", int(d.Minutes())),
+		From:      from,
+		To:        to,
+		Estimated: true,
+		Reason:    "saved by hand from the tray",
+	}
+	outDir := clipDirFor(rc, "manual", to)
+	out := filepath.Join(outDir, clipFileName(from, span.Label))
+
+	res, err := trimSpan(rc, span, out)
+	if err != nil {
+		return "", err
+	}
+	writeClipMeta(out, clipMeta{
+		CreatedAt:           time.Now(),
+		MatchFolder:         "manual",
+		Label:               span.Label,
+		Reason:              span.Reason,
+		KeepRule:            "manual",
+		SpanFrom:            span.From,
+		SpanTo:              span.To,
+		DurationSec:         res.Duration.Seconds(),
+		BoundariesEstimated: true,
+		Gaps:                res.Gaps,
+		FPS:                 rc.FPS,
+		CaptureBackend:      r.backendName(),
+	})
+	logf("recorder: saved the last %s by hand -> %s", d, out)
+	return out, nil
+}
+
+// openClipFolder is what the tray's "Open clips folder" item calls.
+func (r *recorder) openClipFolder() {
+	rc := r.settings()
+	_ = os.MkdirAll(rc.ClipDir, 0o755)
+	openURL(rc.ClipDir)
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}

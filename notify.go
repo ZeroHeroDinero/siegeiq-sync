@@ -25,10 +25,53 @@
 package main
 
 import (
+	_ "embed"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
 )
+
+// The two notification sounds, compiled into the exe.
+//
+// They are ours rather than Windows scheme aliases, and that is the point. The
+// old sound was SystemAsterisk - whatever the player has mapped to a generic
+// notification, shared with every other app on the machine, and on many systems
+// a sound they have learned to ignore. These are short, low and specific, so a
+// finished upload sounds like SiegeIQ rather than like Windows.
+//
+// The upload sound. ONE sound, not a menu of them.
+//
+// A previous build shipped five and let the player choose. That was solving the
+// wrong problem: the difficulty was never that people want different sounds, it
+// was that the first few sounds were bad. A settings screen is not the place to
+// resolve an authoring failure, and every extra option is something that has to
+// be understood before it can be ignored.
+//
+// This one is a dry wooden mallet tap, synthesised for SiegeIQ. It is not a
+// Windows scheme sound and not a chime. It is loudness-matched to sit under
+// game audio rather than over it: the peak is about -29 dBFS and the short-term
+// level about -40 dBFS.
+//
+// It fades to true zero and carries a triangular dither floor. That is not
+// decoration. A decay tail that lands below roughly 250/32768 stops being a
+// curve in 16-bit and becomes a staircase of a handful of values, which is
+// audible as the crackle that made three earlier attempts unusable. If this is
+// ever regenerated, keep the fade and the dither.
+//
+//go:embed sound_ok.wav
+var soundOK []byte
+
+//go:embed sound_fail.wav
+var soundFail []byte
+
+// The recorder gets its own, quieter sound. Syncing and recording are separate
+// features that can run independently, so "your match uploaded" and "your clip
+// was saved" are different events and should not be indistinguishable. This one
+// is measured at 45 percent of the sync sound's loudness, because a clip being
+// cut is the app doing its job rather than something needing attention.
+//
+//go:embed sound_clip.wav
+var soundClip []byte
 
 var (
 	user32           = syscall.NewLazyDLL("user32.dll")
@@ -55,6 +98,8 @@ const (
 	// we could never tell the difference between working and doing nothing.
 	sndAsync     = 0x0001
 	sndNodefault = 0x0002
+	sndMemory    = 0x0004
+	sndFilename  = 0x00020000
 	sndAlias     = 0x00010000
 )
 
@@ -134,11 +179,93 @@ func copyUTF16(dst []uint16, s string) {
 // the PC speaker, so it is audible on any machine with working sound, whatever the user
 // has done to their sound scheme.
 var beepPathLogged int32
+var soundFileWarned int32
 
-func beep(ok bool) {
+func beep(ok bool) { play(pickSound(ok, false), ok, soundFileFor(ok, false)) }
+
+// beepClip is the recorder's quieter confirmation, kept separate from the sync
+// sound so a player can tell the two apart without looking at anything.
+func beepClip(ok bool) { play(pickSound(ok, true), ok, soundFileFor(ok, true)) }
+
+func pickSound(ok, recorder bool) []byte {
+	if !ok {
+		return soundFail
+	}
+	if recorder {
+		return soundClip
+	}
+	return soundOK
+}
+
+// soundFileFor returns a .wav path the player has chosen, or empty.
+//
+// # WHY THIS EXISTS
+//
+// Two rounds were spent authoring these sounds and neither landed, because the
+// person who has to like them cannot be in the room with the person making
+// them. Authoring audio by describing it back and forth does not converge. A
+// file path does: Windows ships a folder of professionally produced short
+// sounds at C:\Windows\Media, the player already knows which ones they can
+// live with, and any .wav on the machine works.
+//
+// The built-in sounds remain the default, so this changes nothing for anyone
+// who never opens the setting.
+func soundFileFor(ok, recorder bool) string {
+	var c config
+	loadJSON(configPath(), &c)
+	switch {
+	case !ok:
+		return c.SoundFailFile
+	case recorder:
+		return c.SoundClipFile
+	default:
+		return c.SoundOKFile
+	}
+}
+
+// play sounds one clip. ok is carried separately from the bytes because the
+// Windows fallbacks below still have to pick a success or failure sound, and a
+// shipped build must not answer "something happened" when the real answer was
+// "that failed".
+func play(wav []byte, ok bool, file string) {
 	if !notifySoundEnabled() {
 		return
 	}
+
+	// A file the player picked wins over anything shipped. SND_FILENAME with
+	// SND_NODEFAULT means a path that has been moved or deleted reports failure
+	// and falls through to the built-in sound, rather than playing nothing at
+	// all and looking like the notification never fired.
+	if file != "" {
+		if p, err := syscall.UTF16PtrFromString(file); err == nil {
+			ret, _, _ := procPlaySoundW.Call(uintptr(unsafe.Pointer(p)), 0,
+				uintptr(sndFilename|sndAsync|sndNodefault))
+			if ret != 0 {
+				return
+			}
+			if atomic.CompareAndSwapInt32(&soundFileWarned, 0, 1) {
+				logf("sound: could not play %s, using the built-in sound instead", file)
+			}
+		}
+	}
+
+	// Our own sound, played straight out of the executable's memory. No temp
+	// file to write, nothing to clean up, and nothing that depends on what the
+	// player has done to their Windows sound scheme.
+	if len(wav) > 0 {
+		ret, _, _ := procPlaySoundW.Call(uintptr(unsafe.Pointer(&wav[0])), 0,
+			uintptr(sndMemory|sndAsync|sndNodefault))
+		if ret != 0 {
+			return
+		}
+		if atomic.CompareAndSwapInt32(&beepPathLogged, 0, 1) {
+			logf("sound: the built-in sound would not play, falling back to the Windows scheme")
+		}
+	}
+
+	// Fallbacks, in the order they are least likely to be wrong. See the note
+	// above about MessageBeep: a missing scheme mapping must REPORT failure
+	// rather than silently routing to a PC speaker that no longer exists.
 	alias := "SystemAsterisk"
 	if !ok {
 		alias = "SystemHand"
@@ -147,20 +274,14 @@ func beep(ok bool) {
 		ret, _, _ := procPlaySoundW.Call(uintptr(unsafe.Pointer(p)), 0,
 			uintptr(sndAlias|sndAsync|sndNodefault))
 		if ret != 0 {
-			if atomic.CompareAndSwapInt32(&beepPathLogged, 0, 1) {
-				logf("sound: using the Windows %s scheme sound", alias)
-			}
 			return
 		}
 	}
-	// Fallback. Beep BLOCKS for the whole duration, so it must not run on the tray
-	// event loop or the menu freezes for a fifth of a second every time.
+	// Last resort. Beep BLOCKS for the whole duration, so it must not run on the
+	// tray event loop or the menu freezes for a fifth of a second every time.
 	freq, dur := uintptr(880), uintptr(140)
 	if !ok {
 		freq, dur = 320, 260
-	}
-	if atomic.CompareAndSwapInt32(&beepPathLogged, 0, 1) {
-		logf("sound: no %s scheme sound, using a synthesised tone instead", alias)
 	}
 	go func() { _, _, _ = procBeep.Call(freq, dur) }()
 }
