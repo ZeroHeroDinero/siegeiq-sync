@@ -529,9 +529,15 @@ function howCapturing(){
     if(S.mode==="tournament") return "waiting for a tournament match";
     return "waiting for Siege to start";
   }
-  var how=(S.capture_method==="gdigrab") ? "window capture" : "GPU screen grab";
+  // capture_live is what is actually running. Fall back to the setting only
+  // when nothing is capturing, because a card that reports the setting over a
+  // live session will happily say "GPU screen grab" above a black recording.
+  var m=S.capture_live||S.capture_method;
+  var how=(m==="gdigrab") ? "window capture" : "GPU screen grab";
+  var pending=(S.capture_live&&S.capture_method&&S.capture_live!==S.capture_method)
+      ? " (restarting to switch)" : "";
   var chip=(S.adapter!=null&&S.adapter>=0) ? (", graphics chip "+S.adapter) : "";
-  return how+chip+", saving to your PC only";
+  return how+chip+pending+", saving to your PC only";
 }
 
 // chaseThumbs comes back for pictures that were not ready yet.
@@ -582,7 +588,7 @@ function paintAbout(){
   if(!el||!S.app_version) return;
   el.innerHTML=
      ab("Version",S.app_version)
-    +ab("Capture",(S.capture_method==="gdigrab"?"window capture":"GPU screen grab")
+    +ab("Capture",((S.capture_live||S.capture_method)==="gdigrab"?"window capture":"GPU screen grab")
         +(S.encoder?(", "+S.encoder):""))
     +ab("Sound",S.audio_on?"being recorded":"not being recorded")
     +ab("Clips folder",S.clip_dir||"not set")

@@ -96,6 +96,11 @@ type recorder struct {
 	// display mode and comes back should not have to find a button in this app
 	// before it will try again.
 	siegeWasRunning bool
+
+	// unfocusedSince is when Siege stopped being the window in front, zero while
+	// it is. Recording pauses once this passes focusGrace, so the buffer only
+	// ever contains the game. See siegeInForeground.
+	unfocusedSince time.Time
 }
 
 // maxCaptureFailures is how many times capture may fail before the recorder
@@ -278,6 +283,14 @@ func (r *recorder) shouldCapture() (bool, string) {
 	if atomic.LoadInt32(&recorderPaused) == 1 {
 		return false, "recorder paused"
 	}
+	// The self-test stops capture on purpose so two ffmpeg processes are not
+	// fighting over the same screen grab. That was undone three seconds later by
+	// this very loop, which saw no capture running and helpfully started one -
+	// so the test measured a machine that was already busy capturing, and the
+	// freshly started session then outlived the test carrying the OLD settings.
+	if captureTestRunning() {
+		return false, "running the capture self-test"
+	}
 	rc := r.settings()
 	switch rc.Mode {
 	case ModeOff:
@@ -300,8 +313,37 @@ func (r *recorder) shouldCapture() (bool, string) {
 	if !siegeRunning() {
 		return false, "Siege is not running"
 	}
+
+	// Siege running is not the same as Siege being the thing on screen, and the
+	// screen is what the GPU path actually records. See siegeInForeground.
+	//
+	// The grace period is not politeness, it is what stops this becoming a worse
+	// bug than the one it fixes. Focus flickers constantly during normal play: a
+	// Windows notification, a Discord popup, the game's own alt-tab handling.
+	// Stopping and restarting ffmpeg on every flicker would churn processes all
+	// evening and punch holes in footage nobody actually left.
+	if siegeInForeground() {
+		r.mu.Lock()
+		r.unfocusedSince = time.Time{}
+		r.mu.Unlock()
+	} else {
+		r.mu.Lock()
+		if r.unfocusedSince.IsZero() {
+			r.unfocusedSince = time.Now()
+		}
+		away := time.Since(r.unfocusedSince)
+		r.mu.Unlock()
+		if away > focusGrace {
+			return false, "Siege is not the window in front"
+		}
+	}
 	return true, ""
 }
+
+// focusGrace is how long Siege may sit behind another window before recording
+// pauses. Long enough to ride out a notification, short enough that reading your
+// email does not end up in the buffer.
+const focusGrace = 4 * time.Second
 
 // run is the recorder's own loop. It is started once, alongside the sync watch
 // loop, and the two never block each other.
@@ -471,6 +513,28 @@ func (r *recorder) capturing() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.session != nil && r.session.Running()
+}
+
+// liveBackend is the way frames are ACTUALLY being grabbed right now, taken
+// from the running session rather than from the settings file.
+//
+// The two are not the same thing and the difference is not academic. A running
+// ffmpeg has its command line fixed at launch, so a settings change does not
+// reach it - and the window, which read the settings, spent twenty minutes
+// reporting "GPU screen grab" over a session that was running window capture
+// and recording black. A status display that reports intent instead of reality
+// is worse than no status display, because it is believed.
+//
+// Returns "" when nothing is capturing, and the caller falls back to describing
+// the setting - which is honest, because at that point the setting is all there
+// is.
+func (r *recorder) liveBackend() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.session == nil || !r.session.Running() {
+		return ""
+	}
+	return r.session.Backend()
 }
 
 func (r *recorder) startCapture(spec captureSpec, rc recorderConfig) {

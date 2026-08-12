@@ -145,7 +145,13 @@ type uiStatus struct {
 	GaveUp        bool   `json:"gave_up"`
 	CaptureError  string `json:"capture_error"`
 	CaptureMethod string `json:"capture_method"`
-	Adapter       int    `json:"adapter"`
+
+	// CaptureLive is how frames are being grabbed RIGHT NOW, empty when nothing
+	// is capturing. CaptureMethod above is only what the settings file asks for,
+	// and the two disagreeing is exactly the state that hid a black recording
+	// behind a card reading "GPU screen grab".
+	CaptureLive string `json:"capture_live"`
+	Adapter     int    `json:"adapter"`
 
 	// Sound. AudioNote is the whole story in one sentence, because "no audio"
 	// with no reason attached is the kind of thing that generates support
@@ -218,6 +224,16 @@ func apiStatus() uiStatus {
 	traceStep("checking capture trouble")
 	s.GaveUp, s.CaptureError = rec.captureTrouble()
 	s.CaptureMethod = rc.CaptureMethod
+
+	// What is running, not what is configured. When a session is live its own
+	// label wins, because that is the thing producing the frames. See
+	// recorder.liveBackend for why this distinction earned its own field.
+	switch rec.liveBackend() {
+	case "ffmpeg/ddagrab":
+		s.CaptureLive = "ddagrab"
+	case "ffmpeg/gdigrab":
+		s.CaptureLive = "gdigrab"
+	}
 
 	// "Recording" used to mean "the ffmpeg process is alive", which is not the
 	// same claim and on this machine was the wrong one. If we believe we are
@@ -640,6 +656,14 @@ func setTestStep(step string) {
 	testMu.Lock()
 	testStep = step
 	testMu.Unlock()
+}
+
+// captureTestRunning lets the recorder loop know to keep its hands off the
+// screen grab while the self-test is measuring it. See recorder.shouldCapture.
+func captureTestRunning() bool {
+	testMu.Lock()
+	defer testMu.Unlock()
+	return testRunning
 }
 
 // apiCaptureTestState is the instant poll the window uses while the test runs.

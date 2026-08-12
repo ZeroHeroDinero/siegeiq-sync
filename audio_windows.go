@@ -117,9 +117,14 @@ func audioVerdict(devs []audioDevice) (canRecord bool, name string, message stri
 	if len(devs) == 0 {
 		return false, "", "No audio inputs were found at all, so game sound cannot be recorded on this PC yet."
 	}
-	return false, "", "None of this PC's audio inputs carry game sound. " +
-		"Windows can usually expose one: open Sound settings, then Recording, right click in the " +
-		"empty space, show disabled devices, and enable Stereo Mix if your sound card offers it."
+	// This used to end by telling the player to go and enable Stereo Mix, which
+	// was correct advice right up until the loopback recorder shipped. After
+	// that it appeared in the self-test results two lines below "Sound is being
+	// recorded", sending people to hunt through Windows sound settings for a
+	// device the app had already stopped needing. Advice that contradicts the
+	// screen it is printed on is worse than no advice.
+	return false, "", "No audio input on this PC carries game sound, and none is needed - " +
+		"Sync records game sound directly from Windows."
 }
 
 // ---- proving a device before the recorder depends on it --------------------

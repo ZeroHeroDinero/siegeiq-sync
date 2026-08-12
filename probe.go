@@ -346,10 +346,30 @@ func runOneProbe(path, dir string, seq int, c probeCandidate, rc recorderConfig,
 
 // applyProbeWinner saves the working configuration so the recorder uses it from
 // now on, and clears the failure counter so it will actually try again.
+//
+// # SAVING IS NOT APPLYING, AND THAT COST A WHOLE EVENING
+//
+// This used to write the winner to the config file, hand it to the recorder,
+// and stop there. What it never did was stop the capture that was ALREADY
+// RUNNING - and a running ffmpeg has its command line baked in at launch, so it
+// carried on grabbing the screen exactly the way it had been before the test.
+//
+// The result was the worst kind of bug, the kind that reports success. The test
+// correctly found that the GPU screen grab worked. It correctly saved it. The
+// window correctly displayed "GPU screen grab". And the recorder correctly kept
+// running window capture for another twenty minutes, filling the buffer with
+// black frames, because nothing ever told it to restart. The only way out was
+// to quit the app, which is not something a player should have to discover.
+//
+// So: if the test changed how frames are grabbed, the current capture is now
+// wrong by definition and gets stopped. The recorder's own loop starts a fresh
+// one within a few seconds using the settings that just won.
 func applyProbeWinner(c probeCandidate) error {
 	var cfg config
 	loadJSON(configPath(), &cfg)
 	cfg.Recorder.normalise()
+
+	was := cfg.Recorder
 	cfg.Recorder.CaptureMethod = c.Method
 	cfg.Recorder.Adapter = c.Adapter
 	// Save whatever won, hardware or not. The old version only ever wrote "cpu"
@@ -365,5 +385,14 @@ func applyProbeWinner(c probeCandidate) error {
 	rec.clearFailures()
 	logf("recorder: capture settings updated from the self-test - method=%s adapter=%d encoder=%s",
 		c.Method, c.Adapter, cfg.Recorder.Encoder)
+
+	if was.CaptureMethod != cfg.Recorder.CaptureMethod ||
+		was.Adapter != cfg.Recorder.Adapter ||
+		was.Encoder != cfg.Recorder.Encoder {
+		logf("recorder: the way frames are grabbed has changed (%s/adapter %d/%s -> %s/adapter %d/%s), so the current recording is being restarted to use it",
+			was.CaptureMethod, was.Adapter, was.Encoder,
+			cfg.Recorder.CaptureMethod, cfg.Recorder.Adapter, cfg.Recorder.Encoder)
+		rec.stopCapture("the capture self-test chose a different way of grabbing the screen")
+	}
 	return nil
 }

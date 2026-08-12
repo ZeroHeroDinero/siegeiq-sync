@@ -41,6 +41,7 @@ var (
 	procMonitorFromWindow   = modUser32.NewProc("MonitorFromWindow")
 	procGetMonitorInfoW     = modUser32.NewProc("GetMonitorInfoW")
 	procEnumDisplayMonitors = modUser32.NewProc("EnumDisplayMonitors")
+	procGetForegroundWindow = modUser32.NewProc("GetForegroundWindow")
 )
 
 const monitorDefaultToNearest = 2
@@ -102,6 +103,48 @@ func siegePIDs() []uint32 {
 
 // siegeRunning is the cheap question the recorder's watch loop asks on a timer.
 func siegeRunning() bool { return len(siegePIDs()) > 0 }
+
+// siegeInForeground reports whether the window the player is actually looking at
+// belongs to Siege.
+//
+// # WHY THIS EXISTS, AND WHY IT IS A PROMISE RATHER THAN A FEATURE
+//
+// The GPU screen grab is DXGI Desktop Duplication. It hands back the composited
+// DESKTOP, and the recorder then crops that to the Siege window's rectangle. In
+// borderless, Siege's rectangle IS the whole screen - so the crop takes
+// everything, and "everything" means whatever window happens to be on top.
+//
+// That was not a theory. The first clip recorded through this path, on the
+// machine this was written for, contained a chat window, an email client and a
+// file browser. The app was doing exactly what it was told. What it was told did
+// not match what siegeiq.gg promises, which is that Sync captures the game and
+// nothing else.
+//
+// So capture holds while Siege is the window in front, and only then. The cost
+// is a gap in the buffer whenever somebody alt-tabs, which is visible and
+// slightly annoying. The alternative is a recorder that quietly films a player's
+// desktop, and there is no version of that worth shipping.
+//
+// STILL INSIDE THE TRUST BOUNDARY: GetForegroundWindow and
+// GetWindowThreadProcessId are window-manager reads, the same class of call as
+// everything else in this file. Nothing is opened, read or injected.
+func siegeInForeground() bool {
+	hwnd, _, _ := procGetForegroundWindow.Call()
+	if hwnd == 0 {
+		return false
+	}
+	var pid uint32
+	procGetWindowThreadPID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 {
+		return false
+	}
+	for _, p := range siegePIDs() {
+		if p == pid {
+			return true
+		}
+	}
+	return false
+}
 
 // enumState carries results out of the EnumWindows callback. Win32 callbacks
 // cannot safely carry Go pointers in their LPARAM, so a guarded package-level

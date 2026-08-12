@@ -759,6 +759,15 @@ func (b ffmpegBackend) Start(spec captureSpec, rc recorderConfig) (captureSessio
 	s.running = true
 	s.mu.Unlock()
 
+	// Put ffmpeg in the kill-on-close job IMMEDIATELY after it starts, before
+	// anything else can fail and return early. From this line on, this ffmpeg
+	// cannot outlive the app, whatever happens to either of them. See
+	// capture_joblimit_windows.go for why that guarantee has to live in the
+	// kernel rather than in a shutdown handler.
+	if cmd.Process != nil {
+		superviseProcess(cmd.Process.Pid)
+	}
+
 	adapter := "system default"
 	if rc.Adapter >= 0 {
 		adapter = itoa(rc.Adapter)

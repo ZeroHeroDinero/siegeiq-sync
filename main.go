@@ -183,8 +183,21 @@ func onReady() {
 	}()
 }
 
+// onExit runs when the tray's Quit item is used.
+//
+// "Nothing to clean up" is what this used to say, and it was wrong in the most
+// expensive way available: ffmpeg is a CHILD PROCESS, and on Windows a child
+// does not die with its parent. Quitting the app left it recording the screen
+// indefinitely. Three such orphans were found still writing to disk long after
+// the app that started them had been replaced.
+//
+// The kernel-level guarantee lives in capture_joblimit_windows.go and covers
+// crashes and force-kills too. This is the polite path that runs first when
+// there IS time to be polite: asking ffmpeg to finish means the last few
+// seconds of footage get a proper index and stay playable, where being
+// terminated would truncate them into an unplayable file.
 func onExit() {
-	// Nothing to clean up - config/state are saved as they change, not on exit.
+	rec.stopCapture("SiegeIQ Sync is closing")
 }
 
 // runSync holds the setup + watch loop. It runs in its own goroutine so the
