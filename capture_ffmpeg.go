@@ -162,13 +162,87 @@ func findFFmpeg(rc recorderConfig) (string, error) {
 	if p, ok := try(filepath.Join(configDir(), "ffmpeg", "ffmpeg.exe")); ok {
 		return p, nil
 	}
+	// Where a player who already has FFmpeg most likely has it. Added 2026-08-13 after a
+	// user hit "no capture engine" on a build that shipped without the bundled copy: the
+	// three places above are all OURS, so someone with a perfectly good system FFmpeg that
+	// is not on PATH got told we could not find one. Package managers put shims on PATH
+	// most of the time and not always, and "C:\ffmpeg\bin" is what every guide on the
+	// internet tells people to do.
+	for _, p := range []string{
+		filepath.Join(os.Getenv("USERPROFILE"), "scoop", "shims", "ffmpeg.exe"),
+		filepath.Join(os.Getenv("ProgramData"), "chocolatey", "bin", "ffmpeg.exe"),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Microsoft", "WinGet", "Links", "ffmpeg.exe"),
+		filepath.Join(os.Getenv("SystemDrive")+"\\", "ffmpeg", "bin", "ffmpeg.exe"),
+		"C:\\ffmpeg\\bin\\ffmpeg.exe",
+	} {
+		if q, ok := try(p); ok {
+			return q, nil
+		}
+	}
 	if p, err := exec.LookPath("ffmpeg.exe"); err == nil {
 		return p, nil
 	}
 	if p, err := exec.LookPath("ffmpeg"); err == nil {
 		return p, nil
 	}
-	return "", fmt.Errorf("ffmpeg.exe not found (looked in: %s, and PATH)", strings.Join(tried, "; "))
+	// MAKE THE FOLDER WE ARE ABOUT TO TELL THEM ABOUT. Added 2026-08-13, and the reason is
+	// embarrassing: the previous version of this message named a folder that does not exist.
+	// configDir() creates %APPDATA%\SiegeIQSync, but nothing has ever created the ffmpeg
+	// subfolder inside it, so a user following the instruction went looking for a path that
+	// was not there and reasonably concluded the advice was wrong. AppData is hidden in
+	// Explorer by default too, which turns "you cannot see it" into "this is broken".
+	//
+	// So: create it, drop a README in it, and only then name it. Once per process, and every
+	// failure is ignored - this is a convenience on an error path and must never become a
+	// second reason recording will not start.
+	ensureFFmpegDropFolder()
+
+	// THE MESSAGE LEADS WITH THE FIX, NOT THE SEARCH PATH. The old text opened with three
+	// absolute paths inside the app's own install folder, which reads as a broken install
+	// and tells the player nothing they can act on. The recovery folder is named first
+	// because it is the one a user can write to without admin rights, and it survives an
+	// app update - dropping the file into the install folder does not.
+	return "", fmt.Errorf(
+		"no video encoder available. To fix it, put ffmpeg.exe in this folder and "+
+			"restart SiegeIQ Sync:\n\n    %s\n\n"+
+			"Get a Windows build from https://www.gyan.dev/ffmpeg/builds/ (the "+
+			"\"essentials\" zip), open it, and copy bin\\ffmpeg.exe into that folder. "+
+			"Replay syncing keeps working either way - this only affects recording.\n\n"+
+			"(also looked in: %s, and PATH)",
+		filepath.Join(configDir(), "ffmpeg"), strings.Join(tried, "; "))
+}
+
+var dropFolderOnce sync.Once
+
+// ensureFFmpegDropFolder creates the recovery folder and explains itself in writing.
+//
+// %APPDATA% is chosen over the install directory on purpose: a normal user can write to it
+// without admin rights, and it survives an app update, which the install folder does not.
+func ensureFFmpegDropFolder() {
+	dropFolderOnce.Do(func() {
+		dir := filepath.Join(configDir(), "ffmpeg")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return
+		}
+		readme := filepath.Join(dir, "PUT ffmpeg.exe IN THIS FOLDER.txt")
+		if _, err := os.Stat(readme); err == nil {
+			return
+		}
+		_ = os.WriteFile(readme, []byte(
+			"SiegeIQ Sync could not find a video encoder, so recording is switched off.\r\n"+
+				"Replay syncing is unaffected and is still working normally.\r\n\r\n"+
+				"TO FIX IT\r\n"+
+				"1. Download a Windows FFmpeg build. The \"essentials\" zip from\r\n"+
+				"   https://www.gyan.dev/ffmpeg/builds/ is the usual one.\r\n"+
+				"2. Open the zip and go into the bin folder.\r\n"+
+				"3. Copy ffmpeg.exe into THIS folder, next to this text file.\r\n"+
+				"4. Restart SiegeIQ Sync.\r\n\r\n"+
+				"That is all. Nothing needs installing and you do not need admin rights.\r\n\r\n"+
+				"WHY THIS FOLDER AND NOT THE PROGRAM FOLDER\r\n"+
+				"This one survives app updates and you can write to it without admin rights.\r\n"+
+				"A copy in the install folder gets wiped the next time SiegeIQ Sync updates.\r\n"),
+			0o644)
+	})
 }
 
 // runFFmpegText runs ffmpeg with the given args and returns its combined output.

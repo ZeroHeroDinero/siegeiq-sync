@@ -388,6 +388,11 @@ func bindUI(w webview2.WebView) {
 	bind("goSaveLast", func(mins string) string { return apiSaveLast(mins) })
 	bind("goOpenFolder", func(string) string { return apiOpenClipFolder() })
 	bind("goOpenLog", func(string) string { return apiOpenLog() })
+	bind("goResults", func(string) string { return jsonOf(apiResults()) })
+	bind("goCoachSpeak", func(raw string) string { return apiCoachSpeak(raw) })
+	bind("goCoachAudio", func(string) string { return jsonOf(apiCoachAudio()) })
+	bind("goSetCoach", func(key string) string { return apiSetCoach(key) })
+	bind("goRefreshResults", func(string) string { return apiRefreshResults() })
 	bind("goCaptureTest", func(string) string { return apiStartCaptureTest() })
 	bind("goCaptureTestState", func(string) string { return jsonOf(apiCaptureTestState()) })
 

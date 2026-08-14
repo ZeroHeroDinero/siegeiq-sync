@@ -53,6 +53,16 @@ REM Build the installer too, if Inno Setup (ISCC.exe) is available.
 REM Inno Setup installs to at least four different places depending on the
 REM installer used. Checking one of them is how somebody who HAS it installed
 REM gets told they do not. Same search RELEASE_SYNC.bat uses.
+REM A dev build with no ffmpeg is fine and normal - it is not going to players.
+REM The installer script now STOPS on a missing recorder, so say out loud that
+REM this one is deliberate. RELEASE_SYNC.bat sets this only when you type
+REM NORECORDER, which is the difference between a dev build and a bad release.
+set "ISCCFLAGS=/DFFmpegDir=%CD%\ffmpeg"
+if not exist "ffmpeg\ffmpeg.exe" (
+  echo [note] ffmpeg\ffmpeg.exe not present - building a sync-only installer.
+  set "ISCCFLAGS=/DNoRecorder /DFFmpegDir=%CD%\ffmpeg"
+)
+
 set "ISCC="
 for %%P in (
   "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
@@ -66,7 +76,8 @@ if not defined ISCC (
   for /f "delims=" %%P in ('where ISCC.exe 2^>nul') do if not defined ISCC set "ISCC=%%P"
 )
 if defined ISCC (
-  "%ISCC%" installer\siegeiq-sync.iss && echo Built installer\dist\SiegeIQSync-Setup.exe || echo Installer build failed.
+  "%ISCC%" %ISCCFLAGS% installer\siegeiq-sync.iss > installer\iscc_log.txt 2>&1 && echo Built installer\dist\SiegeIQSync-Setup.exe || echo Installer build failed - see installer\iscc_log.txt
+  type installer\iscc_log.txt
 ) else (
   echo [skipped] Inno Setup not found - get it from https://jrsoftware.org/isdl.php
   echo           to also produce installer\dist\SiegeIQSync-Setup.exe

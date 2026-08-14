@@ -658,6 +658,49 @@ func setTestStep(step string) {
 	testMu.Unlock()
 }
 
+// apiResults hands the page whatever is known about the player's coaching right
+// now, and never waits for the network.
+//
+// The first call finds nothing and starts a fetch; the page polls and the answer
+// arrives a moment later. That is the only shape allowed here - this binding runs
+// on the window's message loop, and a network call on that thread freezes the
+// whole app. See coachfetch.go.
+func apiResults() resultsSnapshot {
+	snap := resultsSnapshotNow()
+	if snap.State == "idle" {
+		startResultsFetch()
+		snap = resultsSnapshotNow()
+	}
+	return snap
+}
+
+// apiRefreshResults is the Refresh button. Returns immediately; the tab watches
+// the snapshot change underneath it.
+func apiRefreshResults() string {
+	startResultsFetch()
+	return ""
+}
+
+// apiCoachSpeak asks for a match to be read aloud. Returns instantly; the page
+// polls apiCoachAudio for the result.
+func apiCoachSpeak(raw string) string {
+	var in struct {
+		MatchID string `json:"match_id"`
+		Coach   string `json:"coach"`
+	}
+	if err := json.Unmarshal([]byte(raw), &in); err != nil || in.MatchID == "" {
+		return "no match to read out"
+	}
+	startCoachAudio(in.MatchID, in.Coach)
+	return ""
+}
+
+func apiCoachAudio() coachAudio { return coachAudioSnapshot() }
+
+// apiSetCoach changes the coach on the ACCOUNT. Network call, so it is the one
+// place here that can be slow - the page shows the picker as busy while it runs.
+func apiSetCoach(key string) string { return setCoachKey(key) }
+
 // captureTestRunning lets the recorder loop know to keep its hands off the
 // screen grab while the self-test is measuring it. See recorder.shouldCapture.
 func captureTestRunning() bool {

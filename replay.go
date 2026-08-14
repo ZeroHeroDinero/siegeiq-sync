@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -220,11 +221,49 @@ func pair(cfg *config, cfgPath string, mStatus *systray.MenuItem) error {
 // running. Game closed means the match is definitely over, so a short quiet
 // period is enough. Game still open means the only honest signal is a gap
 // longer than a round could possibly be.
+// watchSeen remembers what the last scan found, so the log records CHANGES
+// rather than repeating itself every twenty seconds forever.
+//
+// Keyed BY FOLDER, and that is not a detail. Siege stores each match in its own
+// subfolder, so this function is called ten or twenty times per scan, once per
+// match. A single shared memo therefore compared folder A's count against
+// folder B's, decided it had changed, and logged - for every folder, on every
+// scan, forever. The first version of this did exactly that and produced ten
+// lines in one second saying nine, four, nine, four, six, eight.
+type watchState struct {
+	count  int
+	waited bool
+}
+
+var (
+	watchMu   sync.Mutex
+	watchSeen = map[string]watchState{}
+	watchErr  string
+)
+
 func matchReady(dir string) ([]string, bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		// A replay folder that cannot be read is a real and recoverable state -
+		// Siege moved after an update, the drive is disconnected, the path in
+		// settings is stale. It used to return silently, which made it
+		// indistinguishable from "no matches yet" in a log that mentioned
+		// neither. Somebody could play all evening and find nothing to read.
+		watchMu.Lock()
+		first := watchErr != err.Error()
+		watchErr = err.Error()
+		watchMu.Unlock()
+		if first {
+			logf("watching: cannot read %s - %v", filepath.Base(dir), err)
+		}
 		return nil, false
 	}
+	watchMu.Lock()
+	if watchErr != "" {
+		watchErr = ""
+		logf("watching: the replay folder is readable again")
+	}
+	watchMu.Unlock()
 	var recs []string
 	newest := time.Time{}
 	for _, e := range entries {
@@ -240,6 +279,21 @@ func matchReady(dir string) ([]string, bool) {
 		}
 		recs = append(recs, filepath.Join(dir, e.Name()))
 	}
+	// Report what changed, once. The silence here is what made "I played a match
+	// and nothing happened" impossible to diagnose: with no line either way, an
+	// empty folder, a game with replays turned off and a match still settling
+	// all produced exactly the same nothing.
+	watchMu.Lock()
+	prev, known := watchSeen[dir]
+	changed := !known || prev.count != len(recs)
+	if changed {
+		watchSeen[dir] = watchState{count: len(recs)}
+	}
+	watchMu.Unlock()
+	if changed && len(recs) > 0 {
+		logf("watching: %s has %d round file(s)", filepath.Base(dir), len(recs))
+	}
+
 	if len(recs) == 0 {
 		return nil, false
 	}
@@ -248,9 +302,30 @@ func matchReady(dir string) ([]string, bool) {
 	if siegeRunning() {
 		quiet = matchOverFor
 	}
-	if time.Since(newest) < quiet {
+	if since := time.Since(newest); since < quiet {
+		// Said ONCE per match rather than every scan. Somebody watching the log
+		// after a match should be able to see that the wait is deliberate and
+		// roughly how long is left, instead of guessing whether it is broken.
+		watchMu.Lock()
+		st := watchSeen[dir]
+		sayIt := !st.waited
+		st.waited = true
+		st.count = len(recs)
+		watchSeen[dir] = st
+		watchMu.Unlock()
+		if sayIt {
+			why := "Siege has closed, so this is the short wait"
+			if siegeRunning() {
+				why = "Siege is still open, so a quiet gap is usually just the next round loading"
+			}
+			logf("watching: %s is settling - newest round file is %s old, sending it once it has been "+
+				"quiet for %s (%s)", filepath.Base(dir), since.Round(time.Second), quiet, why)
+		}
 		return nil, false
 	}
+	watchMu.Lock()
+	watchSeen[dir] = watchState{count: len(recs)}
+	watchMu.Unlock()
 
 	sort.Strings(recs)
 	if len(recs) > maxFilesPerMatch {

@@ -17,7 +17,40 @@
 //     is the fix, and removing it brings the bug straight back.
 package main
 
-const uiHTML = `<!DOCTYPE html>
+import (
+	"encoding/json"
+	"strings"
+)
+
+// The page is a template for exactly one reason: the coach avatar is 6 KB of SVG
+// extracted from siegeiq.gg (see coachavatar.go) and pasting it in here by hand
+// would guarantee it drifts from the site the first time the artwork changes.
+var uiHTML = strings.NewReplacer(
+	"__COACH_SVG__", cipherSVG,
+	"__COACH_INNER__", coachInnerJSON(),
+	"__COACH_NAMES__", coachNamesJSON(),
+).Replace(uiHTMLTemplate)
+
+// coachInnerJSON and coachNamesJSON hand the page the other three coaches as
+// data rather than markup. The site swaps a coach by replacing the contents of
+// one drawing, so the app does the same thing with the same drawings.
+func coachInnerJSON() string {
+	b, err := json.Marshal(coachInner)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+func coachNamesJSON() string {
+	b, err := json.Marshal(coachDisplayNames)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+const uiHTMLTemplate = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -127,6 +160,27 @@ button.qlen{padding:7px 12px;font-size:13px;border-radius:8px;flex:none}
 .sending:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
   animation:pulse 1.4s infinite;flex:none}
 .sending.ok{color:var(--good)} .sending.ok:before{background:var(--good);animation:none}
+/* Coach avatar. The mouth is scaled by JavaScript from the live audio, so it has
+   to have a fill-box transform origin or it scales about the wrong point and the
+   face comes apart. Same rule the website uses. */
+.coachbox{display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:linear-gradient(168deg,#132738EE,#0F1E2CEE);
+  border:1px solid var(--line);border-radius:var(--r);padding:18px 20px}
+/* The stage. Matches the website: a pool of light in the CURRENT coach own colour
+   rather than a flat near-black panel, with --coach-tint set by applyCoachLook().
+   The fallback is Cipher blue, so a coach with no tint looks like it always did. */
+.coachart{flex:none;width:150px;padding:10px 10px 4px;border-radius:10px;
+  background:radial-gradient(ellipse 64% 46% at 50% 76%, rgba(var(--coach-tint,24,174,209),0.26), rgba(0,0,0,0) 70%), #14293A;
+  transition:background .35s ease}
+.coachart svg{width:130px;display:block;margin:0 auto}
+.coachctl{flex:1;min-width:240px}
+#coach-mouth{transform-box:fill-box;transform-origin:center;transition:transform .04s linear}
+.coachpickbtn{padding:7px 13px;font-size:13px;border-radius:8px}
+.coachpickbtn.on{background:linear-gradient(140deg,var(--accent),var(--accent2));border-color:transparent;color:#04121B;font-weight:600}
+/* One drawing, four coaches. The artwork is shared with the website on purpose,
+   so rather than four near-identical SVGs that would all have to be re-exported
+   whenever the site's changes, each persona gets its own tint of the same one.
+   Cipher is the drawing as authored, so it carries no filter at all. */
+.coachname{font-size:12px;color:var(--faint);text-align:center;margin-top:6px;letter-spacing:.4px}
 .sending.bad{color:var(--bad)} .sending.bad:before{background:var(--bad);animation:none}
 button.danger:hover{border-color:#F0705C66;color:var(--bad);background:#2015157A}
 
@@ -252,6 +306,7 @@ button.wide{width:100%;justify-content:center}
   <nav class="nav" id="nav">
     <a data-sec="dashboard" class="on" onclick="showSec(&#39;dashboard&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>Dashboard</a>
     <a data-sec="clips" onclick="showSec(&#39;clips&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm3 2.5v7l6-3.5-6-3.5z"/></svg>Clips<span class="n" id="clipn"></span></a>
+    <a data-sec="results" onclick="showSec(&#39;results&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 20h3v-8H4v8zm6.5 0h3V4h-3v16zM17 20h3v-5h-3v5z"/></svg>Results</a>
     <a data-sec="recording" onclick="showSec(&#39;recording&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 15a5 5 0 110-10 5 5 0 010 10z"/></svg>Recording</a>
     <a data-sec="sounds" onclick="showSec(&#39;sounds&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0014 7.97v8.05A4.47 4.47 0 0016.5 12z"/></svg>Sounds</a>
     <a data-sec="about" onclick="showSec(&#39;about&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>About</a>
@@ -306,6 +361,33 @@ button.wide{width:100%;justify-content:center}
 <section id="sec-clips" hidden>
   <h2>Your clips</h2>
   <div id="clips"><div class="skel" style="height:210px"></div></div>
+</section>
+
+<section id="sec-results" hidden>
+  <h2>Your last match</h2>
+  <div id="results"><div class="skel" style="height:220px"></div></div>
+  <div id="coachwrap" hidden>
+    <h2>Voice coach</h2>
+    <div class="coachbox">
+      <div>
+        <div class="coachart" id="coachart">__COACH_SVG__</div>
+        <div class="coachname" id="coachname">Cipher</div>
+      </div>
+      <div class="coachctl">
+        <div id="coachpick" class="row" style="margin-top:0"></div>
+        <div class="row">
+          <button class="primary" id="coachplay" onclick="speakMatch()">Read this match to me</button>
+        </div>
+        <div class="row" style="align-items:center;gap:9px">
+          <span class="savehint" style="margin:0">Volume</span>
+          <input id="coachvol" type="range" min="0" max="100" value="80"
+                 oninput="setCoachVolume(this.value)" style="width:150px">
+          <span class="savehint" id="coachvolnum" style="margin:0">80%</span>
+        </div>
+        <div class="savehint" id="coachmsg" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
 </section>
 
 <section id="sec-recording" hidden>
@@ -513,6 +595,357 @@ function refresh(){
 
 // loadClips is separate from refresh so arriving at the Clips section can ask
 // for a fresh list without re-polling everything else.
+// ---- Results ---------------------------------------------------------------
+//
+// The tab that makes Sync worth opening after a match. It shows the replay
+// numbers and the footage as ONE thing, which is possible here and awkward on
+// the website, because this app produced both halves and already knows they
+// belong together.
+//
+// Everything shown is fetched from SiegeIQ. Nothing about coaching is decided in
+// this file, and nothing about plans is decided here either - a locked panel is
+// drawn because the SERVER said the plan does not include it. That is what keeps
+// a change deployed to the website live in this app with no new build.
+var RESPOLL=null;
+
+function loadResults(){
+  goT("goResults","",20000).then(function(raw){
+    if(!raw) return;
+    var R; try{ R=JSON.parse(raw); }catch(e){ return; }
+    paintResults(R);
+    // Keep asking while the fetch is still running. Stop the moment it settles,
+    // because a tab left open should not poll a backend forever.
+    if(R.state==="loading"){
+      if(!RESPOLL) RESPOLL=setInterval(function(){ if(CURSEC==="results") loadResults(); else stopResPoll(); },1200);
+    } else { stopResPoll(); }
+  });
+}
+function stopResPoll(){ if(RESPOLL){ clearInterval(RESPOLL); RESPOLL=null; } }
+
+function refreshResults(){ goT("goRefreshResults","",8000).then(function(){ loadResults(); }); }
+
+function kd(m){
+  if(m.kills==null||m.deaths==null) return "";
+  return m.kills+" / "+m.deaths;
+}
+
+function matchWhen(iso){
+  if(!iso) return "";
+  var d=new Date(iso);
+  if(isNaN(d.getTime())) return "";
+  return d.toLocaleString();
+}
+
+function paintResults(R){
+  var el=document.getElementById("results");
+  if(!el) return;
+
+  if(R.state==="loading" && !R.latest){
+    el.innerHTML='<div class="skel" style="height:220px"></div>';
+    return;
+  }
+  if(!R.linked){
+    el.innerHTML='<div class="note warn"><div><b>This PC is not linked to a SiegeIQ account yet.</b>'
+      +'<br>Link it from siegeiq.gg and your coaching results will appear here after your next match.</div></div>';
+    return;
+  }
+  if(R.state==="error"){
+    el.innerHTML='<div class="note bad"><div><b>Could not load your results.</b><br>'+esc(R.error||"")
+      +'</div></div><div class="row"><button onclick="refreshResults()">Try again</button></div>';
+    return;
+  }
+  if(!R.latest){
+    el.innerHTML='<div class="note"><div><b>No matches yet.</b><br>'
+      +'Play a match with Sync running. Your replay is uploaded automatically and the results land here.</div></div>';
+    return;
+  }
+
+  var m=R.latest;
+  var h='';
+
+  // The headline card: one match, the numbers and the footage together.
+  h+='<div class="cards">';
+  h+='<div class="card"><div class="k">Map</div><div class="v sm">'+esc(m.map||"Unknown")+'</div>'
+    +'<div class="s">'+esc(m.gamemode||"")+'</div></div>';
+  h+='<div class="card"><div class="k">Kills / deaths</div><div class="v">'+esc(kd(m)||"-")+'</div>'
+    +'<div class="s">'+esc(m.focus||R.name||"")+'</div></div>';
+  h+='<div class="card"><div class="k">Rounds</div><div class="v">'+esc(m.rounds||0)+'</div>'
+    +'<div class="s">'+esc(matchWhen(m.match_ts))+'</div></div>';
+
+  // The footage card is the honest one. It distinguishes "still on this PC",
+  // "sent to SiegeIQ" and "neither", because those are three different
+  // situations and collapsing them is how somebody ends up hunting for a clip
+  // that was never saved.
+  var fv, fs;
+  if(m.clip_path){ fv="On this PC"; fs=m.clip_uploaded?"Also sent to SiegeIQ":"Not sent yet"; }
+  else if(m.clip_uploaded){ fv="Sent"; fs="Your local copy is gone"; }
+  else { fv="No clip"; fs="Nothing was saved for this match"; }
+  h+='<div class="card"><div class="k">Footage</div><div class="v sm">'+esc(fv)+'</div>'
+    +'<div class="s">'+esc(fs)+'</div></div>';
+  h+='</div>';
+
+  h+='<div class="row">';
+  if(m.clip_path) h+='<button class="primary" onclick="playResultClip()">Watch it</button>';
+  h+='<button onclick="refreshResults()">Refresh</button>';
+  h+='</div>';
+
+  // The voice coach lives in its own block below, because it holds a 6 KB SVG
+  // that has no business being rebuilt as a string on every repaint. Locked
+  // accounts see the explanation here and the avatar stays hidden - shown-but-
+  // dead would be worse than absent.
+  if(!R.voice_allowed){
+    h+='<h2>Voice coach</h2>';
+    h+='<div class="note warn"><div><b>Not included on your plan.</b><br>'
+      +'Premium AI voice coaching reads your match back to you in the voice of the coach '
+      +'you pick, and explains what to change. It is part of Pro and Squad.</div></div>';
+  }
+
+  // Career numbers, straight from the server's own aggregate so they can never
+  // disagree with the website.
+  var t=R.totals||{};
+  if(t.matches){
+    h+='<h2>All time</h2><div class="cards">';
+    h+='<div class="card"><div class="k">Matches</div><div class="v">'+esc(t.matches)+'</div></div>';
+    h+='<div class="card"><div class="k">Kills per round</div><div class="v">'+esc(t.kpr!=null?t.kpr:"-")+'</div></div>';
+    h+='<div class="card"><div class="k">Headshot %</div><div class="v">'+esc(t.hs_pct!=null?t.hs_pct+"%":"-")+'</div></div>';
+    h+='<div class="card"><div class="k">Survival</div><div class="v">'+esc(t.survival_rate!=null?t.survival_rate+"%":"-")+'</div></div>';
+    h+='</div>';
+  }
+
+  // Recent matches, deliberately compact. The last match is the headline; this
+  // is context, not a second dashboard.
+  if(R.recent && R.recent.length>1){
+    h+='<h2>Recent matches</h2><div class="cards">';
+    for(var i=1;i<Math.min(R.recent.length,7);i++){
+      var r=R.recent[i];
+      h+='<div class="card"><div class="k">'+esc(r.map||"Unknown")+'</div>'
+        +'<div class="v sm">'+esc(kd(r)||"-")+'</div>'
+        +'<div class="s">'+esc(matchWhen(r.match_ts))+(r.clip_path?" - clip saved":"")+'</div></div>';
+    }
+    h+='</div>';
+  }
+
+  if(R.fetched_at) h+='<div class="savehint" style="margin-top:14px">Updated at '+esc(R.fetched_at)+'</div>';
+
+  el.innerHTML=h;
+  el.setAttribute("data-clip", m.clip_path||"");
+  el.setAttribute("data-match", m.match_id||"");
+
+  var cw=document.getElementById("coachwrap");
+  if(cw){
+    cw.hidden = !R.voice_allowed;
+    if(R.voice_allowed) paintCoachPicker(R.coach||"cipher");
+  }
+}
+
+// ---- The coach speaking ------------------------------------------------------
+//
+// The mouth is driven by the ACTUAL audio, not a timer. A Web Audio analyser
+// reads the loudness of whatever is playing right now and the mouth is scaled to
+// match, which is why it stops moving exactly when the coach stops talking. A
+// timed animation looks convincing for about two seconds and then drifts, and a
+// mouth still flapping after the voice has finished is worse than no mouth at all.
+//
+// This is the same technique the website uses, deliberately.
+var COACHES=[["cipher"],["echo"],["vera"],["nova"]];
+var CURCOACH="cipher", COACHPOLL=null, COACHCTX=null, COACHAUDIO=null;
+
+var COACH_INNER=__COACH_INNER__;
+var COACH_NAMES=__COACH_NAMES__;
+
+// applyCoachLook swaps the DRAWING, not a colour filter.
+//
+// The first version tinted one character four ways. That looked fine until it
+// was put next to the website, where Orion is a robot and Vera and Nova are
+// different people entirely. These are the site's own drawings, so they cannot
+// disagree with it.
+var COACH_TINT={cipher:"24,174,209",echo:"232,184,75",vera:"34,211,238",nova:"244,63,142"};
+
+function applyCoachLook(k){
+  var svg=document.getElementById("coach-svg");
+  if(svg && COACH_INNER[k]) svg.innerHTML=COACH_INNER[k];
+  else if(svg && k==="cipher" && window._cipherInner) svg.innerHTML=window._cipherInner;
+  var nm=document.getElementById("coachname");
+  if(nm) nm.textContent=COACH_NAMES[k]||k;
+  // Same values as the website, so a player switching between the two sees the same
+  // stage light on the same coach. Orion is gold here for the same reason he is gold
+  // there: he and Cipher used to share an accent.
+  var art=document.getElementById("coachart");
+  if(art && COACH_TINT[k]) art.style.setProperty("--coach-tint",COACH_TINT[k]);
+  mouthTo(1);
+}
+
+function paintCoachPicker(active){
+  // Cipher is the drawing that ships inside the page, so its contents have to be
+  // remembered before another coach overwrites them or it can never come back.
+  if(!window._cipherInner){
+    var s0=document.getElementById("coach-svg");
+    if(s0) window._cipherInner=s0.innerHTML;
+  }
+  CURCOACH=active||"cipher";
+  applyCoachLook(CURCOACH);
+  var el=document.getElementById("coachpick");
+  if(!el) return;
+  var h='';
+  for(var i=0;i<COACHES.length;i++){
+    var k=COACHES[i][0], n=COACH_NAMES[k]||k;
+    h+='<button class="coachpickbtn'+(k===CURCOACH?' on':'')+'" onclick="pickCoach(&#39;'+k+'&#39;)">'+n+'</button>';
+  }
+  el.innerHTML=h;
+}
+
+function pickCoach(k){
+  if(k===CURCOACH) return;
+  paintCoachPicker(k);
+  // A different coach is a different voice saying it, so the audio already
+  // fetched is no longer the right audio. Dropping it stops the old coach
+  // speaking after the player has visibly switched to another one.
+  if(COACHAUDIO){ try{ COACHAUDIO.pause(); }catch(e){} COACHAUDIO=null; }
+  coachMsg("Saving your coach...");
+  goT("goSetCoach",k,20000).then(function(err){
+    // The picker moved the moment it was clicked, which is right - waiting for a
+    // round trip before a button looks pressed feels broken. If the save failed,
+    // it goes back rather than lying about what the account now says.
+    if(err){ coachMsg(err); loadResults(); return; }
+    coachMsg("Your coach is now " + k.charAt(0).toUpperCase()+k.slice(1) + ", here and on siegeiq.gg.");
+  });
+}
+
+function coachMsg(t){ var e=document.getElementById("coachmsg"); if(e) e.textContent=t||""; }
+
+function speakMatch(){
+  var el=document.getElementById("results");
+  var mid=el?el.getAttribute("data-match"):"";
+  if(!mid){ coachMsg("No match to read out yet."); return; }
+  var b=document.getElementById("coachplay");
+  if(b){ b.disabled=true; b.textContent="Thinking..."; }
+  coachMsg("The first time a match is spoken it has to be written and voiced, which takes a moment. After that it is instant.");
+  goT("goCoachSpeak",JSON.stringify({match_id:mid,coach:CURCOACH}),20000).then(function(err){
+    if(err){ coachDone(err); return; }
+    if(!COACHPOLL) COACHPOLL=setInterval(pollCoach,900);
+  });
+}
+
+function pollCoach(){
+  goT("goCoachAudio","",20000).then(function(raw){
+    if(!raw) return;
+    var A; try{ A=JSON.parse(raw); }catch(e){ return; }
+    if(A.state==="loading") return;
+    clearInterval(COACHPOLL); COACHPOLL=null;
+    if(A.state==="error"){ coachDone(A.error||"Could not produce the audio."); return; }
+    if(A.state==="ready" && A.audio){ playCoach(A.audio); }
+  });
+}
+
+function coachDone(msg){
+  var b=document.getElementById("coachplay");
+  if(b){ b.disabled=false; b.textContent="Read this match to me"; }
+  coachMsg(msg||"");
+  mouthTo(1);
+}
+
+function playCoach(b64){
+  var b=document.getElementById("coachplay");
+  if(b){ b.textContent="Speaking..."; }
+  coachMsg("");
+  try{
+    if(COACHAUDIO){ try{ COACHAUDIO.pause(); }catch(e){} }
+    COACHAUDIO=new Audio("data:audio/mpeg;base64,"+b64);
+    COACHAUDIO.volume=COACHVOL;
+    COACHAUDIO.onended=function(){ coachDone(""); };
+    COACHAUDIO.onerror=function(){ coachDone("The audio could not be played."); };
+
+    // PLAY FIRST, ANALYSE SECOND, AND NEVER THE OTHER WAY ROUND.
+    //
+    // The first version built the Web Audio graph before playing. Routing a
+    // media element through createMediaElementSource takes it OFF the default
+    // output - everything it produces then goes only through the graph - so if
+    // the audio context is suspended, or the element is treated as cross-origin
+    // because the page was loaded from a string rather than a URL, the result
+    // is total silence with no error. The mouth animation silenced the voice it
+    // existed to visualise.
+    //
+    // Now the sound is started on its own and is never at risk. The analyser is
+    // attempted afterwards purely to drive the mouth, and if anything about it
+    // fails the mouth falls back to a simpler motion while the audio carries on.
+    COACHAUDIO.play().then(function(){ attachMouth(); }).catch(function(){
+      coachDone("This machine would not play the audio.");
+    });
+  }catch(e){
+    coachDone("This machine could not play the audio.");
+  }
+}
+
+// attachMouth drives the mouth from the real audio if the browser allows it,
+// and from a plain envelope if it does not. Either way it stops when the voice
+// stops, which is the part people actually notice.
+function attachMouth(){
+  var usedAnalyser=false;
+  try{
+    if(!COACHCTX){ COACHCTX=new (window.AudioContext||window.webkitAudioContext)(); }
+    if(COACHCTX.state==="suspended"){ COACHCTX.resume(); }
+    // Reusing a source for the same element throws, so this is only ever built
+    // once per audio element and remembered on the element itself.
+    if(!COACHAUDIO._siqSrc){
+      COACHAUDIO._siqSrc=COACHCTX.createMediaElementSource(COACHAUDIO);
+      var an=COACHCTX.createAnalyser(); an.fftSize=256;
+      COACHAUDIO._siqSrc.connect(an);
+      an.connect(COACHCTX.destination);
+      COACHAUDIO._siqAn=an;
+    }
+    var an2=COACHAUDIO._siqAn;
+    var data=new Uint8Array(an2.frequencyBinCount);
+    usedAnalyser=true;
+    var tick=function(){
+      if(!COACHAUDIO || COACHAUDIO.paused || COACHAUDIO.ended){ mouthTo(1); return; }
+      an2.getByteFrequencyData(data);
+      var sum=0; for(var i=0;i<data.length;i++) sum+=data[i];
+      var avg=sum/data.length;
+      mouthTo(Math.max(0.6, Math.min(2.6, 0.6 + avg/38)));
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }catch(e){
+    usedAnalyser=false;
+  }
+  if(usedAnalyser) return;
+
+  // Fallback. Not lip sync, but it moves while the coach is speaking and stops
+  // the moment they stop, which is the whole visual point. Chosen over leaving
+  // the mouth still, because a coach talking with a frozen face reads as broken.
+  var t0=Date.now();
+  var wobble=function(){
+    if(!COACHAUDIO || COACHAUDIO.paused || COACHAUDIO.ended){ mouthTo(1); return; }
+    var t=(Date.now()-t0)/1000;
+    var v=1.3 + 0.55*Math.sin(t*11.0) + 0.30*Math.sin(t*17.3);
+    mouthTo(Math.max(0.6, Math.min(2.4, v)));
+    requestAnimationFrame(wobble);
+  };
+  requestAnimationFrame(wobble);
+}
+
+// Volume is remembered for the session and applied to whatever is playing now,
+// so dragging the slider mid-sentence does what somebody expects rather than
+// taking effect on the next match.
+var COACHVOL=0.8;
+function setCoachVolume(v){
+  COACHVOL=Math.max(0, Math.min(1, (parseInt(v,10)||0)/100));
+  if(COACHAUDIO) COACHAUDIO.volume=COACHVOL;
+  var n=document.getElementById("coachvolnum");
+  if(n) n.textContent=Math.round(COACHVOL*100)+"%";
+}
+
+function mouthTo(scale){
+  var m=document.getElementById("coach-mouth");
+  if(m) m.style.transform="scaleY("+scale+")";
+}
+
+function playResultClip(){
+  var el=document.getElementById("results");
+  var p=el?el.getAttribute("data-clip"):"";
+  if(p) goT("goPlayClip",p,8000);
+}
+
 function loadClips(){
   goJ("goClips",null,15000).then(function(c){ if(c!==null){ C=c||[]; paintClips(); chaseThumbs(0); } });
 }
@@ -579,6 +1012,9 @@ function showSec(name){
   // Clips are the one section worth re-fetching on arrival, because a clip
   // saved while another section was open would otherwise not be there.
   if(name==="clips") loadClips();
+  // Results are worth re-asking for on arrival too: a match played while another
+  // section was open is exactly the one somebody opens this tab to look at.
+  if(name==="results") loadResults();
 }
 
 // paintAbout fills the About section from the same status object everything
