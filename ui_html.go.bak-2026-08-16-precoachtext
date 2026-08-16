@@ -228,13 +228,6 @@ button.wide{width:100%;justify-content:center}
    look like the broken one next to it, which is the whole reason these three read
    as unfinished for so long. */
 .opt .flag.ok{color:var(--good);border-color:#4FD19955}
-/* What the coach is saying, in writing. Not decoration: it is the only way this
-   feature works at all for somebody deaf, muted, or unable to play sound, and it
-   lets anyone check the words against their own match rather than trusting a
-   synthetic voice they cannot re-read. */
-#coachtext{margin-top:11px;background:#0B1725;border:1px solid var(--line);
-           border-left:3px solid var(--accent);border-radius:9px;padding:11px 14px;
-           font-size:13.5px;line-height:1.62;color:var(--text);max-width:640px}
 
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(224px,1fr));gap:12px}
 .fld{background:#0E1B29;border:1px solid var(--line);border-radius:11px;padding:13px 15px;transition:border-color .2s}
@@ -386,7 +379,6 @@ button.wide{width:100%;justify-content:center}
       </div>
       <div class="coachctl">
         <div id="coachpick" class="row" style="margin-top:0"></div>
-        <div class="savehint" id="coachwhich" style="margin:0 0 8px">&nbsp;</div>
         <div class="row">
           <button class="primary" id="coachplay" onclick="speakMatch()">Read this match to me</button>
           <button id="coachsample" onclick="sampleCoach()">Hear this voice</button>
@@ -410,7 +402,6 @@ button.wide{width:100%;justify-content:center}
           <span class="savehint" id="coachvolnum" style="margin:0">80%</span>
         </div>
         <div class="savehint" id="coachmsg" style="margin-top:10px"></div>
-        <div id="coachtext" hidden></div>
       </div>
     </div>
   </div>
@@ -769,23 +760,6 @@ function paintResults(R){
   if(cw){
     cw.hidden = !R.voice_allowed;
     if(R.voice_allowed) paintCoachPicker(R.coach||"cipher");
-  // Say WHICH match will be read. Without this the button is a promise about an
-  // unnamed match, and the panel above it lists five.
-  var wl=document.getElementById("coachwhich");
-  if(wl){
-    var L=R.latest||{};
-    if(!L.map){ wl.textContent="No match to read out yet."; }
-    else{
-      // Naming the FOCUS PLAYER is the important half. The readout is built from
-      // whichever row SiegeIQ believes is you, and if that binding is wrong the coach
-      // will confidently narrate a stranger's stat line as your match. Printing the
-      // name here turns a silent wrong answer into an obvious one.
-      var when = L.match_ts ? new Date(L.match_ts).toLocaleString() : "";
-      var who  = L.focus ? (" \u00b7 read as " + L.focus) : "";
-      wl.textContent = "Reads your most recent match: " + L.map +
-                       (when ? (", " + when) : "") + who;
-    }
-  }
   if(R.voice_allowed){
     goT("goCoachLang","",20000).then(function(v){
       var el=document.getElementById("coachlang");
@@ -870,15 +844,7 @@ function pickCoach(k){
 
 function coachMsg(t){ var e=document.getElementById("coachmsg"); if(e) e.textContent=t||""; }
 
-function coachText(t){
-  var e=document.getElementById("coachtext");
-  if(!e) return;
-  if(t){ e.textContent=t; e.hidden=false; }
-  else { e.textContent=""; e.hidden=true; }
-}
-
 function speakMatch(){
-  coachText("");
   var el=document.getElementById("results");
   var mid=el?el.getAttribute("data-match"):"";
   if(!mid){ coachMsg("No match to read out yet."); return; }
@@ -898,7 +864,7 @@ function pollCoach(){
     if(A.state==="loading") return;
     clearInterval(COACHPOLL); COACHPOLL=null;
     if(A.state==="error"){ coachDone(A.error||"Could not produce the audio."); return; }
-    if(A.state==="ready" && A.audio){ coachText(A.text||""); playCoach(A.audio); }
+    if(A.state==="ready" && A.audio){ playCoach(A.audio); }
   });
 }
 
@@ -945,7 +911,6 @@ function togglePauseCoach(){
 // The server caches the four samples for ever, so this never costs anything after
 // the first press by anyone.
 function sampleCoach(){
-  coachText("");
   var sb=document.getElementById("coachsample");
   if(sb){ sb.disabled=true; }
   coachMsg("");
@@ -1311,8 +1276,7 @@ function paintFields(){
    +sel("encoder","Encoder",settings.encoder,["auto","nvenc","amf","qsv","cpu"],"Auto prefers your graphics card over your processor.")
    +num("quality","Quality",settings.quality,"Lower is better and larger. 23 is a sensible default.")
    +num("max_mbps","Size ceiling (Mbps)",settings.max_mbps,"0 works it out from your resolution and frame rate. Caps how large a busy scene can get.")
-   +sel("audio_off","Game sound",settings.audio_off?"off":"on",["on","off"],"Records what your speakers play, if this PC exposes a device that carries it. On some PCs that includes other apps, such as voice chat.")
-   +sel("overlay_on","In-game reminder",settings.overlay_on?"on":"off",["off","on"],"Between rounds, shows your current focus over the game for six seconds. One line, no numbers, never during a round.")
+   +sel("audio_off","Game sound",settings.audio_off?"off":"on",["on","off"],"Records what your speakers play, if this PC exposes a device that carries it.")
    +selNum("buffer_minutes","Buffer length",settings.buffer_minutes,
         [[15,"15 minutes"],[30,"30 minutes"],[45,"45 minutes, a full ranked match"],
          [60,"1 hour"],[90,"1 hour 30"],[120,"2 hours"]],
@@ -1374,8 +1338,6 @@ function saveSettings(){
   // The select gives back "on" or "off". The stored field is the OFF switch, so
   // an absent key means on for anyone upgrading. See reccfg.go.
   if(typeof settings.audio_off==="string") settings.audio_off=(settings.audio_off==="off");
-  // Stored as the ON state, unlike audio. reccfg.go explains why this one is opt in.
-  if(typeof settings.overlay_on==="string") settings.overlay_on=(settings.overlay_on==="on");
   delete settings.audio;
   go("goSaveSettings",JSON.stringify(settings)).then(function(err){
     toast(err?err:"Settings saved."); refresh(); });

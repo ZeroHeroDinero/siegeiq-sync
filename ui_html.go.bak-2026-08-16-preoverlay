@@ -1311,8 +1311,7 @@ function paintFields(){
    +sel("encoder","Encoder",settings.encoder,["auto","nvenc","amf","qsv","cpu"],"Auto prefers your graphics card over your processor.")
    +num("quality","Quality",settings.quality,"Lower is better and larger. 23 is a sensible default.")
    +num("max_mbps","Size ceiling (Mbps)",settings.max_mbps,"0 works it out from your resolution and frame rate. Caps how large a busy scene can get.")
-   +sel("audio_off","Game sound",settings.audio_off?"off":"on",["on","off"],"Records what your speakers play, if this PC exposes a device that carries it. On some PCs that includes other apps, such as voice chat.")
-   +sel("overlay_on","In-game reminder",settings.overlay_on?"on":"off",["off","on"],"Between rounds, shows your current focus over the game for six seconds. One line, no numbers, never during a round.")
+   +sel("audio_off","Game sound",settings.audio_off?"off":"on",["on","off"],"Records what your speakers play, if this PC exposes a device that carries it.")
    +selNum("buffer_minutes","Buffer length",settings.buffer_minutes,
         [[15,"15 minutes"],[30,"30 minutes"],[45,"45 minutes, a full ranked match"],
          [60,"1 hour"],[90,"1 hour 30"],[120,"2 hours"]],
@@ -1374,8 +1373,6 @@ function saveSettings(){
   // The select gives back "on" or "off". The stored field is the OFF switch, so
   // an absent key means on for anyone upgrading. See reccfg.go.
   if(typeof settings.audio_off==="string") settings.audio_off=(settings.audio_off==="off");
-  // Stored as the ON state, unlike audio. reccfg.go explains why this one is opt in.
-  if(typeof settings.overlay_on==="string") settings.overlay_on=(settings.overlay_on==="on");
   delete settings.audio;
   go("goSaveSettings",JSON.stringify(settings)).then(function(err){
     toast(err?err:"Settings saved."); refresh(); });

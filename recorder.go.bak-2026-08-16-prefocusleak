@@ -612,7 +612,6 @@ func (r *recorder) stopCapture(why string) {
 		return
 	}
 	logf("recorder: stopping capture - %s", why)
-	noteFocusedNow(time.Now())
 	_ = sess.Stop()
 }
 

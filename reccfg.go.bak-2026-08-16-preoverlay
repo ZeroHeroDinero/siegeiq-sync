@@ -132,15 +132,6 @@ type recorderConfig struct {
 	ClipDir    string `json:"clip_dir"`
 	FFmpegPath string `json:"ffmpeg_path"`
 
-	// OverlayOn shows a one-line reminder over the game between rounds.
-	//
-	// Stored as the ON state, breaking this file's own absent-means-on convention,
-	// and deliberately. That convention exists so a shipped improvement reaches
-	// existing installs without asking. This one draws on top of somebody's game,
-	// and a feature that starts painting over a competitive match because they
-	// accepted an update is not an improvement, it is a surprise. Opt in.
-	OverlayOn bool `json:"overlay_on,omitempty"`
-
 	// Destinations.
 	SendToAI             string `json:"send_to_ai"`
 	AutoUploadTournament bool   `json:"auto_upload_tournament"`

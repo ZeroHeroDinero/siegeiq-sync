@@ -46,14 +46,6 @@ type coachAudio struct {
 	// and plays it through a Web Audio analyser so the mouth moves in time with
 	// the actual sound rather than on a timer that drifts.
 	Audio string `json:"audio"`
-
-	// Text is what is being said, shown on screen beside the avatar.
-	//
-	// Worth having for more than curiosity: it is the only way somebody deaf, muted,
-	// or sitting in a room where they cannot play sound gets the coaching at all, and
-	// it lets anyone check the words against their own match instead of taking a
-	// synthetic voice on trust.
-	Text string `json:"text"`
 }
 
 var (
@@ -73,52 +65,38 @@ func coachAudioSnapshot() coachAudio {
 // Same single retry after a 401 as coachGet, and for the same reason: a pass can
 // die before its own clock says so, and repeating a request the server has twice
 // refused helps nobody.
-// coachPostH is coachPost with the response headers kept. The spoken coaching
-// returns its words in X-Coach-Text, so throwing the headers away would mean
-// asking the server for the same thing twice to get both halves of one answer.
-func coachPostH(cfg config, path string, payload any) ([]byte, int, http.Header, error) {
-	body, code, hdr, err := coachPostFull(cfg, path, payload)
-	return body, code, hdr, err
-}
-
 func coachPost(cfg config, path string, payload any) ([]byte, int, error) {
-	b, c, _, err := coachPostFull(cfg, path, payload)
-	return b, c, err
-}
-
-func coachPostFull(cfg config, path string, payload any) ([]byte, int, http.Header, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		tok, err := thePass.get(cfg)
 		if err != nil {
-			return nil, 0, nil, err
+			return nil, 0, err
 		}
 		req, err := http.NewRequest("POST", backend+path, bytes.NewReader(body))
 		if err != nil {
-			return nil, 0, nil, err
+			return nil, 0, err
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)
 		if err != nil {
-			return nil, 0, nil, fmt.Errorf("could not reach SiegeIQ (%v)", err)
+			return nil, 0, fmt.Errorf("could not reach SiegeIQ (%v)", err)
 		}
 		out, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
 		code := resp.StatusCode
-		hdr := resp.Header.Clone()
 		resp.Body.Close()
 
 		if code == 401 && attempt == 0 {
 			thePass.forget()
 			continue
 		}
-		return out, code, hdr, nil
+		return out, code, nil
 	}
-	return nil, 0, nil, fmt.Errorf("your SiegeIQ session could not be renewed")
+	return nil, 0, fmt.Errorf("your SiegeIQ session could not be renewed")
 }
 
 // startCoachAudio asks the server to speak a match. Returns immediately.
@@ -160,7 +138,7 @@ func startCoachAudio(matchID, coach string) {
 		if cfg.CoachLang != "" && cfg.CoachLang != "en" {
 			payload["lang"] = cfg.CoachLang
 		}
-		body, code, hdr, err := coachPostH(cfg, "/coach/match-readout", payload)
+		body, code, err := coachPost(cfg, "/coach/match-readout", payload)
 		if err != nil {
 			logf("coaching: voice failed - %v", err)
 			set(func(c *coachAudio) { c.State, c.Error = "error", err.Error() })
@@ -211,17 +189,9 @@ func startCoachAudio(matchID, coach string) {
 			return
 		}
 		enc := base64.StdEncoding.EncodeToString(body)
-		spoken := ""
-		if hdr != nil {
-			if raw := hdr.Get("X-Coach-Text"); raw != "" {
-				if dec, derr := base64.StdEncoding.DecodeString(raw); derr == nil {
-					spoken = string(dec)
-				}
-			}
-		}
 		logf("coaching: %s read this match back, %d KB of audio", coach, len(body)/1024)
 		set(func(c *coachAudio) {
-			c.State, c.Error, c.Audio, c.Text = "ready", "", enc, spoken
+			c.State, c.Error, c.Audio = "ready", "", enc
 		})
 	}()
 }

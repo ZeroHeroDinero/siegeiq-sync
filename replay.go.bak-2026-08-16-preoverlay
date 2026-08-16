@@ -292,11 +292,6 @@ func matchReady(dir string) ([]string, bool) {
 	watchMu.Unlock()
 	if changed && len(recs) > 0 {
 		logf("watching: %s has %d round file(s)", filepath.Base(dir), len(recs))
-		// A round just ended. `known` matters: without it, the first scan of a folder
-		// full of last week's matches would fire the overlay for every one of them.
-		if known && len(recs) > prev.count {
-			overlayRoundEnded()
-		}
 	}
 
 	if len(recs) == 0 {
