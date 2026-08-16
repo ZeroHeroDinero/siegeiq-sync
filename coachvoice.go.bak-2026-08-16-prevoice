@@ -135,9 +135,6 @@ func startCoachAudio(matchID, coach string) {
 		if coach != "" {
 			payload["coach"] = coach
 		}
-		if cfg.CoachLang != "" && cfg.CoachLang != "en" {
-			payload["lang"] = cfg.CoachLang
-		}
 		body, code, err := coachPost(cfg, "/coach/match-readout", payload)
 		if err != nil {
 			logf("coaching: voice failed - %v", err)
@@ -194,78 +191,6 @@ func startCoachAudio(matchID, coach string) {
 			c.State, c.Error, c.Audio = "ready", "", enc
 		})
 	}()
-}
-
-// startCoachSample plays one fixed line in a coach's voice so the player can hear
-// who they are picking before they commit to it.
-//
-// It deliberately reuses the same state, the same poll and the same player as the
-// match readout, which means the avatar's mouth moves for a sample too. That was
-// not the reason for reusing it, but it is the reason not to change it.
-//
-// The server side is fixed text cached in R2 for ever, so this is free after the
-// first press by anyone, anywhere - no rate limit is needed here and adding one
-// would only stop somebody hearing something already generated.
-func startCoachSample(coach string) {
-	cvMu.Lock()
-	if cvRunning {
-		cvMu.Unlock()
-		return
-	}
-	cvRunning = true
-	cvState = coachAudio{State: "loading", Coach: coach}
-	cvMu.Unlock()
-
-	go func() {
-		defer func() {
-			cvMu.Lock()
-			cvRunning = false
-			cvMu.Unlock()
-		}()
-
-		var cfg config
-		loadJSON(configPath(), &cfg)
-
-		set := func(fn func(*coachAudio)) {
-			cvMu.Lock()
-			fn(&cvState)
-			cvMu.Unlock()
-		}
-
-		body, code, err := coachPost(cfg, "/coach/voice-sample", map[string]string{"coach": coach})
-		if err != nil {
-			set(func(c *coachAudio) { c.State, c.Error = "error", err.Error() })
-			return
-		}
-		if code != 200 || len(body) < 512 {
-			msg := fmt.Sprintf("Could not play a sample (%d)", code)
-			var detail struct {
-				Detail string `json:"detail"`
-			}
-			if json.Unmarshal(body, &detail) == nil && detail.Detail != "" {
-				msg = detail.Detail
-			}
-			set(func(c *coachAudio) { c.State, c.Error = "error", msg })
-			return
-		}
-		set(func(c *coachAudio) {
-			c.State, c.Error, c.Audio = "ready", "", base64.StdEncoding.EncodeToString(body)
-		})
-	}()
-}
-
-// setCoachLang saves the spoken-coaching language on this machine. See config.go
-// for why this one is local while the coach is on the account.
-func setCoachLang(lang string) string {
-	var cfg config
-	p := configPath()
-	loadJSON(p, &cfg)
-	cfg.CoachLang = lang
-	// saveJSON returns nothing and logs its own failures, matching every other
-	// caller in this app. Do not invent an error return here for one field.
-	saveJSON(p, &cfg)
-	logf("coaching: spoken coaching language is now %s", lang)
-	return ""
 }
 
 // setCoachKey saves the chosen coach on the ACCOUNT, not in this app.

@@ -17,7 +17,7 @@ import (
 // backend is the SiegeIQ API root. version is the running build - keep it in
 // lockstep with winres/winres.json and the installer's AppVersion.
 const backend = "https://siegeiq-backend-production.up.railway.app"
-const version = "1.5.2"
+const version = "1.5.1"
 
 const (
 	scanEvery = 20 * time.Second // how often the watch loop rescans the replay folder
@@ -43,17 +43,7 @@ var paused int32
 
 type config struct {
 	DeviceToken string `json:"device_token"`
-
-	// CoachLang is the language the spoken coaching is written and voiced in.
-	//
-	// Stored on THIS MACHINE, unlike the chosen coach, which lives on the account so
-	// that siegeiq.gg and this app cannot disagree about it. That inconsistency is
-	// deliberate and worth knowing about: putting language on the account needs a
-	// column and an endpoint, and a player who wants German here almost certainly
-	// wants German everywhere, so this should move to the account when there is a
-	// reason to touch that table anyway. Empty means English.
-	CoachLang string `json:"coach_lang,omitempty"`
-	ReplayDir string `json:"replay_dir"`
+	ReplayDir   string `json:"replay_dir"`
 	// Stored as OFF switches so an absent key means ON. A config file written by an
 	// older build therefore turns the notifications on rather than silently leaving
 	// a new feature dead for every existing install.

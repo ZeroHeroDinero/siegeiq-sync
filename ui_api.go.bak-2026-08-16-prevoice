@@ -697,31 +697,6 @@ func apiCoachSpeak(raw string) string {
 
 func apiCoachAudio() coachAudio { return coachAudioSnapshot() }
 
-// apiCoachSample auditions a voice. Same state and same player as the readout, so
-// the page polls goCoachAudio for this exactly as it does for a match.
-func apiCoachSample(coach string) string {
-	if coach == "" {
-		return "no coach selected"
-	}
-	startCoachSample(coach)
-	return ""
-}
-
-// apiCoachLang reports the saved language when asked with an empty string, and
-// saves one otherwise. Two jobs in one binding because the page needs both and the
-// bridge passes exactly one string each way.
-func apiCoachLang(lang string) string {
-	if lang == "" {
-		var cfg config
-		loadJSON(configPath(), &cfg)
-		if cfg.CoachLang == "" {
-			return "en"
-		}
-		return cfg.CoachLang
-	}
-	return setCoachLang(lang)
-}
-
 // apiSetCoach changes the coach on the ACCOUNT. Network call, so it is the one
 // place here that can be slow - the page shows the picker as busy while it runs.
 func apiSetCoach(key string) string { return setCoachKey(key) }

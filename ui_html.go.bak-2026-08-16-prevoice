@@ -381,19 +381,6 @@ button.wide{width:100%;justify-content:center}
         <div id="coachpick" class="row" style="margin-top:0"></div>
         <div class="row">
           <button class="primary" id="coachplay" onclick="speakMatch()">Read this match to me</button>
-          <button id="coachsample" onclick="sampleCoach()">Hear this voice</button>
-          <button id="coachpause" onclick="togglePauseCoach()" hidden>Pause</button>
-        </div>
-        <div class="row" style="align-items:center;gap:9px">
-          <span class="savehint" style="margin:0">Language</span>
-          <select id="coachlang" onchange="setCoachLang(this.value)">
-            <option value="en">English</option>
-            <option value="es">Espanol</option>
-            <option value="fr">Francais</option>
-            <option value="de">Deutsch</option>
-            <option value="pt">Portugues</option>
-            <option value="ja">Nihongo</option>
-          </select>
         </div>
         <div class="row" style="align-items:center;gap:9px">
           <span class="savehint" style="margin:0">Volume</span>
@@ -760,12 +747,6 @@ function paintResults(R){
   if(cw){
     cw.hidden = !R.voice_allowed;
     if(R.voice_allowed) paintCoachPicker(R.coach||"cipher");
-  if(R.voice_allowed){
-    goT("goCoachLang","",20000).then(function(v){
-      var el=document.getElementById("coachlang");
-      if(el && v) el.value=v;
-    });
-  }
   }
 }
 
@@ -871,62 +852,8 @@ function pollCoach(){
 function coachDone(msg){
   var b=document.getElementById("coachplay");
   if(b){ b.disabled=false; b.textContent="Read this match to me"; }
-  var sb=document.getElementById("coachsample"); if(sb) sb.disabled=false;
-  showPause(false);
   coachMsg(msg||"");
   mouthTo(1);
-}
-
-function showPause(on){
-  var p=document.getElementById("coachpause");
-  if(!p) return;
-  p.hidden=!on;
-  if(on) p.textContent="Pause";
-}
-
-// togglePauseCoach stops and restarts the voice.
-//
-// The mouth needs no special handling on the way DOWN - its animation loop already
-// checks COACHAUDIO.paused every frame and closes the mouth when it finds it. What
-// it does not do is schedule another frame after that, so the loop is dead by the
-// time play resumes and the mouth would stay shut through the rest of the sentence.
-// Restarting it on resume is the whole trick, and attachMouth is safe to call twice
-// because it remembers its audio source on the element itself.
-function togglePauseCoach(){
-  if(!COACHAUDIO) return;
-  var p=document.getElementById("coachpause");
-  if(COACHAUDIO.paused){
-    COACHAUDIO.play().then(function(){ attachMouth(); }).catch(function(){});
-    if(p) p.textContent="Pause";
-    coachMsg("");
-  }else{
-    try{ COACHAUDIO.pause(); }catch(e){}
-    if(p) p.textContent="Resume";
-    mouthTo(1);
-    coachMsg("Paused.");
-  }
-}
-
-// sampleCoach plays one fixed line so a voice can be heard before it is chosen.
-// The server caches the four samples for ever, so this never costs anything after
-// the first press by anyone.
-function sampleCoach(){
-  var sb=document.getElementById("coachsample");
-  if(sb){ sb.disabled=true; }
-  coachMsg("");
-  goT("goCoachSample",CURCOACH,20000).then(function(err){
-    if(err){ coachDone(err); return; }
-    if(!COACHPOLL) COACHPOLL=setInterval(pollCoach,900);
-  });
-}
-
-function setCoachLang(v){
-  goT("goCoachLang",v,20000).then(function(err){
-    if(err){ coachMsg(err); return; }
-    // Said plainly, because the effect is not immediate and the reason is money:
-    // a match already spoken stays cached in the language it was spoken in.
-    coachMsg("New matches will be read out in this language. Matches already spoken keep the language they were recorded in.");
-  });
 }
 
 function playCoach(b64){
@@ -953,7 +880,7 @@ function playCoach(b64){
     // Now the sound is started on its own and is never at risk. The analyser is
     // attempted afterwards purely to drive the mouth, and if anything about it
     // fails the mouth falls back to a simpler motion while the audio carries on.
-    COACHAUDIO.play().then(function(){ showPause(true); attachMouth(); }).catch(function(){
+    COACHAUDIO.play().then(function(){ attachMouth(); }).catch(function(){
       coachDone("This machine would not play the audio.");
     });
   }catch(e){
