@@ -247,9 +247,6 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 	rec.configure(cfg)
 	logf("recorder: %s", recorderSummary(cfg.Recorder))
 	go rec.run()
-	// Keeps rec.tournamentActive honest so ModeTournament actually does something.
-	// Cheap when idle and silent unless the answer changes.
-	go watchTournament()
 
 	// Opening the window is about INTENT, not about whether it has ever been
 	// opened before. Somebody who double-clicks the app wants to see it, every

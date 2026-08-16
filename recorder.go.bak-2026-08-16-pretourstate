@@ -263,24 +263,6 @@ func (r *recorder) setKeepRule(rule string) {
 	logf("recorder: keep rule set to %s", rule)
 }
 
-// setTournamentActive is the writer that never existed. Until 2026-08-16 the
-// field it sets was read in two places and assigned in none, so ModeTournament
-// was permanently off. See tournamentwatch.go.
-func (r *recorder) setTournamentActive(on bool, matchID string) {
-	r.mu.Lock()
-	changed := r.tournamentActive != on
-	r.tournamentActive = on
-	r.mu.Unlock()
-	if !changed {
-		return
-	}
-	if on {
-		logf("recorder: tournament match %s is live - buffering", matchID)
-	} else {
-		logf("recorder: no tournament match live - tournament buffering stopped")
-	}
-}
-
 func (r *recorder) setArmed(on bool) {
 	r.mu.Lock()
 	r.armed = on

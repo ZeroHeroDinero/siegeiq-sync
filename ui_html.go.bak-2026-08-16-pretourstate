@@ -443,10 +443,7 @@ var S={}, C=[], settings={}, connected=false;
 
 var MODES=[
  ["siege_running","While Siege is running","Buffers the whole time you are in game. The usual choice.",""],
- // Wired 2026-08-16 (tournamentwatch.go). The remaining condition is the same one
- // the keep rules have: the app has to be linked to ask the server whether a match
- // is live, so an unlinked or paused install cannot know.
- ["tournament","Tournament matches only","Buffers only while you have a SiegeIQ tournament match live.","needs syncing on"],
+ ["tournament","Tournament matches only","Buffers only during a SiegeIQ tournament match.","not wired up yet"],
  ["manual","Only when I arm it","Buffers nothing until you switch it on from here.",""],
  ["off","Off","No recording at all. Syncing is unaffected.",""]
 ];
