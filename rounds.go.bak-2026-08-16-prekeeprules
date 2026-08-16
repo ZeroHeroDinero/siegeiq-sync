@@ -32,7 +32,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -60,27 +59,19 @@ type roundSpan struct {
 // is what the "rounds I died in" style keep rules need. Absent until the backend
 // supplies it; never guessed.
 type roundEvent struct {
-	Index          int    `json:"index"`
-	File           string `json:"file"`
-	UploaderDied   bool   `json:"uploader_died"`
-	UploaderKills  int    `json:"uploader_kills"`
-	UploaderClutch bool   `json:"uploader_clutch"`
+	Index          int  `json:"index"`
+	UploaderDied   bool `json:"uploader_died"`
+	UploaderKills  int  `json:"uploader_kills"`
+	UploaderClutch bool `json:"uploader_clutch"`
 	// Exact boundaries, seconds relative to the round's end. Zero means unknown.
 	StartBeforeEndSec  float64 `json:"start_before_end_sec"`
 	ActionBeforeEndSec float64 `json:"action_before_end_sec"`
 }
 
 // matchEvents is the optional decoded detail for a whole match.
-//
-// UploaderDetail is the honesty switch. The backend sets it only when it could
-// pick this account out of its own replay roster. When it is false the three
-// uploader fields above are absent from the JSON, which means Go unmarshals them
-// to a confident false/0 - and "you died in no rounds" is indistinguishable from
-// "we could not tell". The keep rules degrade on a false rather than believing it.
 type matchEvents struct {
-	MatchID        string       `json:"match_id"`
-	Rounds         []roundEvent `json:"rounds"`
-	UploaderDetail bool         `json:"uploader_detail"`
+	MatchID string       `json:"match_id"`
+	Rounds  []roundEvent `json:"rounds"`
 }
 
 // matchPlan is everything the trimmer needs about one match.
@@ -100,53 +91,13 @@ func (p matchPlan) span() (time.Time, time.Time, bool) {
 	return p.Rounds[0].Start, p.Rounds[len(p.Rounds)-1].End, true
 }
 
-// haveFileKeys reports whether the backend gave us .rec filenames to join on.
-func (p matchPlan) haveFileKeys() bool {
-	if p.Events == nil {
-		return false
-	}
-	for _, e := range p.Events.Rounds {
-		if e.File != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// eventForRound finds the decoded detail for a round, if there is any.
-//
-// # JOIN ON THE FILENAME, NOT THE ROUND NUMBER
-//
-// It is tempting to match e.Index against r.Index, and it is wrong. The two count
-// differently: this file numbers rounds 1..N by .rec filename order, while the
-// parser reports Siege's own roundNumber, which is ZERO-BASED. Measured on the
-// live corpus 2026-08-16 - thirty matches start at round 0. Matching the numbers
-// directly puts round 2's boundaries and round 2's kills under a round-1 label,
-// and the result looks completely plausible, which is what makes it dangerous.
-//
-// Adding one is not a fix either. A replay folder can be missing its early rounds
-// (Siege keeps only the last twelve matches and prunes), so the offset is not a
-// constant. The filename is the only key that means the same thing on both sides.
-//
-// When filenames are present and none matches, that is an ANSWER: this payload
-// does not describe this round. Falling through to position at that point is the
-// index-zip that has produced a wrong-but-convincing table before. The number is
-// used only when the backend supplied no filenames at all, i.e. an older build.
-func (p matchPlan) eventForRound(r roundSpan) (roundEvent, bool) {
+// eventFor finds the decoded detail for a round, if there is any.
+func (p matchPlan) eventFor(index int) (roundEvent, bool) {
 	if p.Events == nil {
 		return roundEvent{}, false
 	}
-	if p.haveFileKeys() {
-		want := filepath.Base(r.File)
-		for _, e := range p.Events.Rounds {
-			if e.File != "" && strings.EqualFold(filepath.Base(e.File), want) {
-				return e, true
-			}
-		}
-		return roundEvent{}, false
-	}
 	for _, e := range p.Events.Rounds {
-		if e.Index+1 == r.Index {
+		if e.Index == index {
 			return e, true
 		}
 	}
@@ -236,7 +187,7 @@ func (p *matchPlan) applyEvents(ev *matchEvents) {
 
 	anyEstimate := false
 	for i := range p.Rounds {
-		e, ok := p.eventForRound(p.Rounds[i])
+		e, ok := p.eventFor(p.Rounds[i].Index)
 		if !ok || e.StartBeforeEndSec <= 0 {
 			anyEstimate = true
 			continue

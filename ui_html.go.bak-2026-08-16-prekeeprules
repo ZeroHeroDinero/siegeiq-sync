@@ -224,10 +224,6 @@ button.wide{width:100%;justify-content:center}
 .opt span{display:block;color:var(--dim);font-size:12.5px;margin-top:3px;line-height:1.5}
 .opt .flag{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
            color:var(--warn);border:1px solid #F0B45C55;border-radius:20px;padding:1px 7px;margin-top:7px}
-/* A prerequisite is not a warning. Amber on "needs syncing on" made a working rule
-   look like the broken one next to it, which is the whole reason these three read
-   as unfinished for so long. */
-.opt .flag.ok{color:var(--good);border-color:#4FD19955}
 
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(224px,1fr));gap:12px}
 .fld{background:#0E1B29;border:1px solid var(--line);border-radius:11px;padding:13px 15px;transition:border-color .2s}
@@ -451,14 +447,9 @@ var RULES=[
  ["action_only","Action phase of every round","Skips the drone phase at the start of each round.",""],
  ["whole_match","The whole match","One long clip, first round through to the last.",""],
  ["last_seconds","Last seconds of each round","Just the endings, length set below.",""],
- // These three went live 2026-08-16. They no longer describe a missing capability -
- // the detail is decoded and arrives on the reply to the match upload - so the flag
- // names the one condition that is actually left: syncing has to be on, because a
- // match nobody uploaded is a match nobody can read. Green, not amber: this is a
- // working feature with a prerequisite, not a warning.
- ["my_deaths","Only rounds I died in","Every round you were killed in, drone phase trimmed off.","needs syncing on"],
- ["my_kills","Only rounds I got a kill","Every round you got at least one kill, drone phase trimmed off.","needs syncing on"],
- ["clutches","Only my clutch rounds","Rounds you won as the last player alive.","needs syncing on"],
+ ["my_deaths","Only rounds I died in","Falls back to the action phase until SiegeIQ can decode round detail.","needs decode"],
+ ["my_kills","Only rounds I got a kill","Falls back to the action phase until SiegeIQ can decode round detail.","needs decode"],
+ ["clutches","Only my clutch rounds","Falls back to the action phase until SiegeIQ can decode round detail.","needs decode"],
  ["nothing","Nothing automatically","Buffer only. You save moments by hand.",""]
 ];
 
@@ -1157,7 +1148,7 @@ function paintOptions(){
 function opt(field,val,title,sub,flag,sel){
   return '<div class="opt'+(sel?" sel":"")+'" onclick="pick(\''+field+'\',\''+val+'\')">'
    +'<div class="rd"></div><div><b>'+title+'</b><span>'+sub+'</span>'
-   +(flag?'<span class="flag'+(/^needs syncing/.test(flag)?" ok":"")+'">'+flag+'</span>':'')+'</div></div>';
+   +(flag?'<span class="flag">'+flag+'</span>':'')+'</div></div>';
 }
 function pick(f,v){ settings[f]=v; paintOptions(); }
 

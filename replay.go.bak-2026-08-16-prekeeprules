@@ -335,18 +335,8 @@ func matchReady(dir string) ([]string, bool) {
 }
 
 // upload sends one match's .rec files to /sync/match with the device token.
-// Returns (permanentlyDone, events, err): 4xx responses are recorded and not retried.
-//
-// # THE REPLY IS NOT A RECEIPT
-//
-// This function used to read the response body only to quote it back in an error
-// message, and throw it away on success. That body is where the decoded per-round
-// detail lives - who died, who got a kill, who was last alive - and it is the only
-// place the desktop app can ever get it, because nothing here can parse a .rec.
-// Discarding it is why "only rounds I died in" degraded to the action phase on
-// every match ever recorded, while a perfectly good answer went in the bin one
-// line above the log message explaining that no answer was available.
-func upload(cfg *config, files []string) (bool, *matchEvents, error) {
+// Returns (permanentlyDone, err): 4xx responses are recorded and not retried.
+func upload(cfg *config, files []string) (bool, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	for _, p := range files {
@@ -363,38 +353,26 @@ func upload(cfg *config, files []string) (bool, *matchEvents, error) {
 	w.Close()
 	req, err := http.NewRequest("POST", backend+"/sync/match", &buf)
 	if err != nil {
-		return false, nil, err
+		return false, err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Header.Set("Authorization", "Device "+cfg.DeviceToken)
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, nil, err // network trouble: retry next scan
+		return false, err // network trouble: retry next scan
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	switch {
 	case resp.StatusCode == 200:
-		// A reply we cannot read is not an upload failure - the match is safely up
-		// there and the player's stats will update. Only the clip detail is lost, so
-		// it is logged and the keep rule degrades, rather than the match being marked
-		// failed and re-sent forever.
-		var out struct {
-			MatchEvents *matchEvents `json:"matchEvents"`
-		}
-		if jerr := json.Unmarshal(body, &out); jerr != nil {
-			logf("  uploaded fine, but the round detail in the reply could not be read (%v) - "+
-				"clips for this match fall back to the action phase", jerr)
-			return true, nil, nil
-		}
-		return true, out.MatchEvents, nil
+		return true, nil
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return false, nil, fmt.Errorf("unlinked (HTTP %d) - re-pair needed", resp.StatusCode)
+		return false, fmt.Errorf("unlinked (HTTP %d) - re-pair needed", resp.StatusCode)
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		return true, nil, fmt.Errorf("rejected (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return true, fmt.Errorf("rejected (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	default:
-		return false, nil, fmt.Errorf("server error (HTTP %d) - will retry", resp.StatusCode)
+		return false, fmt.Errorf("server error (HTTP %d) - will retry", resp.StatusCode)
 	}
 }
 

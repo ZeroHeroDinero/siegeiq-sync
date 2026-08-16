@@ -333,98 +333,77 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 				continue
 			}
 
-			// THE UPLOAD RUNS FIRST NOW, AND THE ORDER IS THE WHOLE POINT.
-			//
-			// Trimming used to happen here, before the upload, which was fine while
-			// every keep rule could be answered from the .rec files' timestamps alone.
-			// Three of them cannot: "only rounds I died in", "only rounds I got a kill"
-			// and "only my clutch rounds" need to know what happened inside the round,
-			// and the only place this app can learn that is the reply to the upload.
-			// Cutting before that reply arrives means those rules can NEVER fire - they
-			// degrade on every match, for ever, with no error anywhere to explain it.
-			//
-			// Waiting costs nothing: the buffer holds 45 minutes and an upload takes
-			// seconds. Wrapped in a closure so the early-outs stay early-outs rather
-			// than becoming three levels of nested if.
-			ev := func() *matchEvents {
-				if atomic.LoadInt32(&paused) == 1 {
-					return nil
-				}
-				if prev := st.Uploaded[name]; prev != "" {
-					// A match that was uploaded and has since GROWN means rounds were
-					// sent before the match finished - which is exactly what the old
-					// 45-second settle rule did on every live game. Re-sending is not
-					// done automatically yet, because whether the backend treats a
-					// second POST of the same match as an update or as a duplicate has
-					// not been confirmed, and quietly doubling somebody's Verified
-					// Stats would be a worse bug than the one being fixed. So it says
-					// so, loudly, once.
-					if n, ok := uploadedCount(prev); ok && len(files) > n {
-						if st.Uploaded[name+"#short"] == "" {
-							st.Uploaded[name+"#short"] = "logged"
-							saveJSON(stPath, st)
-							logf("NOTE: %s was uploaded with %d round file(s) and now has %d. "+
-								"The earlier upload was incomplete - this match needs re-sending once "+
-								"the backend is confirmed to replace rather than duplicate.", name, n, len(files))
-						}
-					}
-					return nil
-				}
-				logf("new match: %s (%d round files) - uploading...", name, len(files))
-				mStatus.SetTitle("Uploading " + name + "...")
-				systray.SetTooltip("SiegeIQ Sync - uploading a match")
-				done, events, err := upload(cfg, files)
-				if err != nil {
-					logf("  %v", err)
-					if isRepairNeeded(err) {
-						cfg.DeviceToken = ""
-						saveJSON(cfgPath, cfg)
-						mStatus.SetTitle("Unlinked - re-pairing...")
-						if perr := pair(cfg, cfgPath, mStatus); perr != nil {
-							logf("re-pairing failed: %v", perr)
-							time.Sleep(scanEvery)
-						}
-						return nil
-					}
-				}
-				if done {
-					if err == nil {
-						st.Uploaded[name] = fmt.Sprintf("ok:%d", len(files))
-						logf("  synced OK (%d round files)", len(files))
-						notifyUploadOK(name)
-					} else {
-						st.Uploaded[name] = "failed"
-						// An unlinked device is not a normal upload failure and must not read
-						// like one. "Sync will try again" is actively misleading here: it will
-						// try forever and never succeed until the player re-pairs.
-						if strings.Contains(err.Error(), "unlinked") {
-							notifyUnlinked()
-						} else {
-							notifyUploadFailed(name, shortReason(err))
-						}
-					}
-					saveJSON(stPath, st)
-				}
-				if atomic.LoadInt32(&paused) == 0 {
-					mStatus.SetTitle("Watching for matches...")
-					systray.SetTooltip("SiegeIQ Sync - watching for matches")
-				}
-				if events != nil {
-					logf("  read round detail for %d round(s) - the keep rules that need it can run",
-						len(events.Rounds))
-				}
-				return events
-			}()
-
 			// The recorder sees every settled match exactly once, whether or not
 			// uploading is paused. Cutting footage on round boundaries needs only
-			// these files' timestamps, which are already here on disk - nothing has
-			// to be uploaded, parsed server-side, or even opened. `ev` is a bonus:
-			// present, it cuts exact rounds; absent, it cuts estimated ones and says so.
+			// these files' timestamps, which are already here on disk - nothing
+			// has to be uploaded, parsed server-side, or even opened.
 			if st.Clipped[name] == "" {
 				st.Clipped[name] = "seen"
 				saveJSON(stPath, st)
-				rec.handleMatch(dir, files, ev)
+				rec.handleMatch(dir, files)
+			}
+
+			if atomic.LoadInt32(&paused) == 1 {
+				continue
+			}
+			if prev := st.Uploaded[name]; prev != "" {
+				// A match that was uploaded and has since GROWN means rounds were
+				// sent before the match finished - which is exactly what the old
+				// 45-second settle rule did on every live game. Re-sending is not
+				// done automatically yet, because whether the backend treats a
+				// second POST of the same match as an update or as a duplicate has
+				// not been confirmed, and quietly doubling somebody's Verified
+				// Stats would be a worse bug than the one being fixed. So it says
+				// so, loudly, once.
+				if n, ok := uploadedCount(prev); ok && len(files) > n {
+					if st.Uploaded[name+"#short"] == "" {
+						st.Uploaded[name+"#short"] = "logged"
+						saveJSON(stPath, st)
+						logf("NOTE: %s was uploaded with %d round file(s) and now has %d. "+
+							"The earlier upload was incomplete - this match needs re-sending once "+
+							"the backend is confirmed to replace rather than duplicate.", name, n, len(files))
+					}
+				}
+				continue
+			}
+			logf("new match: %s (%d round files) - uploading...", name, len(files))
+			mStatus.SetTitle("Uploading " + name + "...")
+			systray.SetTooltip("SiegeIQ Sync - uploading a match")
+			done, err := upload(cfg, files)
+			if err != nil {
+				logf("  %v", err)
+				if isRepairNeeded(err) {
+					cfg.DeviceToken = ""
+					saveJSON(cfgPath, cfg)
+					mStatus.SetTitle("Unlinked - re-pairing...")
+					if perr := pair(cfg, cfgPath, mStatus); perr != nil {
+						logf("re-pairing failed: %v", perr)
+						time.Sleep(scanEvery)
+					}
+					continue
+				}
+			}
+			if done {
+				if err == nil {
+					st.Uploaded[name] = fmt.Sprintf("ok:%d", len(files))
+					logf("  synced OK (%d round files)", len(files))
+					notifyUploadOK(name)
+				} else {
+					st.Uploaded[name] = "failed"
+					// An unlinked device is not a normal upload failure and must not read
+					// like one. "Sync will try again" is actively misleading here: it will
+					// try forever and never succeed until the player re-pairs.
+					if strings.Contains(err.Error(), "unlinked") {
+						notifyUnlinked()
+					} else {
+						notifyUploadFailed(name, shortReason(err))
+					}
+				}
+				saveJSON(stPath, st)
+			}
+			if atomic.LoadInt32(&paused) == 0 {
+				mStatus.SetTitle("Watching for matches...")
+				systray.SetTooltip("SiegeIQ Sync - watching for matches")
 			}
 		}
 		time.Sleep(scanEvery)

@@ -48,22 +48,11 @@ func evaluateKeepRule(plan matchPlan, rc recorderConfig) (spans []keepSpan, note
 	pre := time.Duration(rc.PrePadSec) * time.Second
 	post := time.Duration(rc.PostPadSec) * time.Second
 
-	// Two ways the detail can be missing, and they are not the same thing. No events
-	// at all means the match was never uploaded - syncing is paused, the upload failed,
-	// or Verified Stats is offline. Events without UploaderDetail means the match WAS
-	// read but this account could not be picked out of its own roster, so every
-	// uploader_* field arrived absent and unmarshalled to a confident zero. Believing
-	// that second case keeps nothing and reports "no rounds matched", which reads like
-	// a quiet evening rather than a failure. Both degrade to the action phase.
 	rule := rc.KeepRule
-	if rc.needsEvents() && (plan.Events == nil || !plan.Events.UploaderDetail) {
-		why := "this match has not been read by SiegeIQ yet (is syncing paused?)"
-		if plan.Events != nil {
-			why = "SiegeIQ read this match but could not tell which player is you"
-		}
+	if rc.needsEvents() && plan.Events == nil {
 		notes = append(notes, fmt.Sprintf(
-			"%q needs decoded round detail - %s, so the action phase of every round was kept instead",
-			rule, why))
+			"%q needs decoded round detail, which is not available for this match - kept the action phase of every round instead",
+			rule))
 		rule = KeepActionOnly
 	}
 
@@ -124,7 +113,7 @@ func evaluateKeepRule(plan matchPlan, rc recorderConfig) (spans []keepSpan, note
 	case KeepMyDeaths, KeepMyKills, KeepClutches:
 		kept := 0
 		for _, r := range plan.Rounds {
-			e, ok := plan.eventForRound(r)
+			e, ok := plan.eventFor(r.Index)
 			if !ok {
 				continue
 			}

@@ -587,11 +587,8 @@ func (r *recorder) stopCapture(why string) {
 // its own goroutine so trimming never delays an upload, and vice versa.
 //
 // It is called whether or not uploading is paused, which is what makes
-// recorder-on/sync-off work. `ev` is the decoded per-round detail from the upload
-// reply and is nil whenever there was no upload to get it from - paused, failed,
-// or Verified Stats offline. Nil is a normal, handled state: every keep rule that
-// needs it degrades to the action phase and says so on the clip.
-func (r *recorder) handleMatch(matchFolder string, files []string, ev *matchEvents) {
+// recorder-on/sync-off work.
+func (r *recorder) handleMatch(matchFolder string, files []string) {
 	rc := r.settings()
 	if rc.Mode == ModeOff || rc.KeepRule == KeepNothing {
 		return
@@ -609,11 +606,6 @@ func (r *recorder) handleMatch(matchFolder string, files []string, ev *matchEven
 		if len(plan.Rounds) == 0 {
 			return
 		}
-
-		// Overlay the decoded detail. Rounds the backend gave real boundaries for stop
-		// being estimates; rounds it did not mention keep theirs. Harmless when ev is
-		// nil, so there is no branch here.
-		plan.applyEvents(ev)
 
 		// Siege keeps a dozen past matches on disk, so the very first scan after
 		// an install sees a folder full of history. None of it can possibly be in
