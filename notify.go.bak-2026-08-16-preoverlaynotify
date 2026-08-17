@@ -325,23 +325,9 @@ func balloon(title, text string, ok bool) {
 }
 
 // notifyUploadOK is the quiet one. A player wants reassurance, not a fanfare.
-//
-// # WHY THIS ALSO GOES THROUGH THE OVERLAY
-//
-// The balloon below is a legacy Shell_NotifyIcon toast, and Windows SUPPRESSES those
-// while an exclusive full-screen game is running - Focus Assist switches itself on for
-// games by default. An upload happens the instant a match ends, with Siege still in
-// front, so the one notification this app exists to give was being swallowed every
-// single time and only ever seen by someone who happened to be tabbed out.
-//
-// The overlay is the only surface that reliably draws over a full-screen game, so the
-// same message goes there too. It respects the player's on/off switch: if they have
-// said they do not want anything drawn on their game, this does not overrule that, and
-// the balloon still fires for whenever they tab out.
 func notifyUploadOK(match string) {
 	beep(true)
 	balloon("Match uploaded", "SiegeIQ has your replay for "+match+". Nothing else to do.", true)
-	overlayShow("Match uploaded. SiegeIQ has your replay.")
 }
 
 // notifyUploadFailed is the one that actually matters. A silent failure is how somebody

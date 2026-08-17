@@ -697,6 +697,13 @@ func apiCoachSpeak(raw string) string {
 
 func apiCoachAudio() coachAudio { return coachAudioSnapshot() }
 
+// apiOverlayPreview draws the in-game reminder immediately, whatever the setting
+// says. The one honest way to answer "does this work on my machine".
+func apiOverlayPreview() string {
+	go overlayPreview()
+	return ""
+}
+
 // apiCoachSample auditions a voice. Same state and same player as the readout, so
 // the page polls goCoachAudio for this exactly as it does for a match.
 func apiCoachSample(coach string) string {

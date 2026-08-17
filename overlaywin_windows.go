@@ -135,11 +135,15 @@ var (
 // overlayShow puts one line on screen and fades it out. Safe to call from any
 // goroutine and safe to call when the overlay is switched off.
 func overlayShow(line string) {
-	if line == "" {
+	if !rec.settings().OverlayOn {
 		return
 	}
-	rc := rec.settings()
-	if !rc.OverlayOn {
+	overlayShowForced(line)
+}
+
+// overlayShowForced skips the on/off check. Only the preview button uses it.
+func overlayShowForced(line string) {
+	if line == "" {
 		return
 	}
 	ensureOverlayThread()

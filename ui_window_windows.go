@@ -393,6 +393,7 @@ func bindUI(w webview2.WebView) {
 	bind("goCoachAudio", func(string) string { return jsonOf(apiCoachAudio()) })
 	bind("goSetCoach", func(key string) string { return apiSetCoach(key) })
 	bind("goCoachSample", func(coach string) string { return apiCoachSample(coach) })
+	bind("goOverlayPreview", func(string) string { return apiOverlayPreview() })
 	bind("goCoachLang", func(lang string) string { return apiCoachLang(lang) })
 	bind("goRefreshResults", func(string) string { return apiRefreshResults() })
 	bind("goCaptureTest", func(string) string { return apiStartCaptureTest() })

@@ -35,10 +35,8 @@ type recorderMenu struct {
 	modeItems map[string]*systray.MenuItem
 	ruleItems map[string]*systray.MenuItem
 
-	saveLast    *systray.MenuItem
-	openFolder  *systray.MenuItem
-	overlay     *systray.MenuItem
-	showOverlay *systray.MenuItem
+	saveLast   *systray.MenuItem
+	openFolder *systray.MenuItem
 }
 
 // modeLabels and ruleLabels are the player-facing wording. Order matters - it is
@@ -86,15 +84,6 @@ func buildRecorderMenu() *recorderMenu {
 		it := keep.AddSubMenuItemCheckbox(opt.label, opt.tip, rc.KeepRule == opt.key)
 		m.ruleItems[opt.key] = it
 	}
-
-	// The overlay switch lives here as well as in Settings. Putting it ONLY in
-	// Settings was a mistake: the thing it controls appears over the game, so the
-	// place you reach for it is the tray, not a window you have to go and open.
-	m.overlay = m.root.AddSubMenuItemCheckbox("In-game reminder",
-		"Show your current focus over the game for six seconds between rounds", rc.OverlayOn)
-
-	m.showOverlay = m.root.AddSubMenuItem("Show the reminder now",
-		"Draw it immediately, so you can see where it appears without playing a round")
 
 	m.saveLast = m.root.AddSubMenuItem("Save the last 2 minutes",
 		"Write whatever is in the buffer right now to a clip")
@@ -157,21 +146,6 @@ func (m *recorderMenu) run() {
 
 		case <-m.openFolder.ClickedCh:
 			go rec.openClipFolder()
-
-		case <-m.overlay.ClickedCh:
-			on := !rec.settings().OverlayOn
-			if on {
-				m.overlay.Check()
-			} else {
-				m.overlay.Uncheck()
-			}
-			rec.setOverlayOn(on)
-
-		case <-m.showOverlay.ClickedCh:
-			// Deliberately ignores the on/off switch. This is the "does it even
-			// draw on my machine" button, and refusing to answer that because the
-			// feature is switched off would be useless.
-			go overlayPreview()
 
 		case key := <-modeCh:
 			checkOnly(m.modeItems, key)

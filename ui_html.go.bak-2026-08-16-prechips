@@ -228,11 +228,6 @@ button.wide{width:100%;justify-content:center}
    look like the broken one next to it, which is the whole reason these three read
    as unfinished for so long. */
 .opt .flag.ok{color:var(--good);border-color:#4FD19955}
-.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px}
-.chip{font:inherit;font-size:12.5px;padding:6px 13px;border-radius:20px;cursor:pointer;
-      background:var(--panel);border:1px solid var(--line);color:var(--dim);transition:border-color .18s}
-.chip:hover{border-color:var(--line2)}
-.chip.on{background:linear-gradient(150deg,#12303F,#0E1F2C);border-color:var(--accent);color:var(--text)}
 /* What the coach is saying, in writing. Not decoration: it is the only way this
    feature works at all for somebody deaf, muted, or unable to play sound, and it
    lets anyone check the words against their own match rather than trusting a
@@ -376,7 +371,6 @@ button.wide{width:100%;justify-content:center}
 
 <section id="sec-clips" hidden>
   <h2>Your clips</h2>
-  <div id="clipchips" class="chips"></div>
   <div id="clips"><div class="skel" style="height:210px"></div></div>
 </section>
 
@@ -1456,40 +1450,8 @@ function showTestReport(r){
     refresh();
 }
 
-// CLIPFILTER narrows the list by what SAVED the clip, not by anything guessed from
-// the file. Each keep rule stamps its own label into the clip's sidecar, so this is
-// reading a decision that was already made rather than re-deciding it here.
-var CLIPFILTER="all";
-var CLIPKINDS=[["all","All"],["kills","Kills"],["deaths","Deaths"],["clutch","Clutches"]];
-
-function clipKind(c){
-  var s=((c.label||"")+" "+(c.reason||"")).toLowerCase();
-  if(s.indexOf("clutch")>=0) return "clutch";
-  if(s.indexOf("death")>=0 || s.indexOf("you died")>=0) return "deaths";
-  if(s.indexOf("kill")>=0) return "kills";
-  return "other";
-}
-
-function paintChips(){
-  var el=document.getElementById("clipchips");
-  if(!el) return;
-  // Hidden entirely when there is nothing to filter. A row of chips above three
-  // clips is clutter pretending to be a feature.
-  var kinds={}; C.forEach(function(c){ kinds[clipKind(c)]=(kinds[clipKind(c)]||0)+1; });
-  var shown=CLIPKINDS.filter(function(k){ return k[0]==="all" || kinds[k[0]]; });
-  if(C.length<2 || shown.length<2){ el.innerHTML=""; return; }
-  el.innerHTML=shown.map(function(k){
-    var n = k[0]==="all" ? C.length : kinds[k[0]];
-    return '<button class="chip'+(CLIPFILTER===k[0]?" on":"")+'" onclick="setClipFilter(\''+k[0]+'\')">'
-         + k[1]+' ('+n+')</button>';
-  }).join("");
-}
-
-function setClipFilter(k){ CLIPFILTER=k; paintChips(); paintClips(); }
-
 function paintClips(){
   var el=document.getElementById("clips");
-  paintChips();
   if(!C.length){
     el.className="";
     el.innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M18 4v1h-2V4H8v1H6V4H4v16h2v-1h2v1h8v-1h2v1h2V4h-2zM8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2zm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>'
@@ -1497,16 +1459,7 @@ function paintClips(){
     return;
   }
   el.className="clips";
-  var view=C.map(function(c,i){ return {c:c,i:i}; })
-            .filter(function(x){ return CLIPFILTER==="all" || clipKind(x.c)===CLIPFILTER; });
-  if(!view.length){
-    el.className="";
-    el.innerHTML='<div class="empty"><p>No '+CLIPFILTER+' clips in this list.</p>'
-      +'<p class="small">Pick All above to see everything again.</p></div>';
-    return;
-  }
-  el.innerHTML=view.map(function(x){
-    var c=x.c, i=x.i;
+  el.innerHTML=C.map(function(c,i){
     var shot=c.thumb
       ? '<img src="'+c.thumb+'" alt="">'
       : '<div class="none">no preview</div>';

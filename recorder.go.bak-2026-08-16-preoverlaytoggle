@@ -263,19 +263,6 @@ func (r *recorder) setKeepRule(rule string) {
 	logf("recorder: keep rule set to %s", rule)
 }
 
-// setOverlayOn turns the between-rounds reminder on or off and persists it, so the
-// tray and the Settings pane can never end up disagreeing about it.
-func (r *recorder) setOverlayOn(on bool) {
-	r.mu.Lock()
-	r.rc.OverlayOn = on
-	if r.cfg != nil {
-		r.cfg.Recorder = r.rc
-		saveJSON(configPath(), r.cfg)
-	}
-	r.mu.Unlock()
-	logf("recorder: in-game reminder %s", map[bool]string{true: "on", false: "off"}[on])
-}
-
 // setTournamentActive is the writer that never existed. Until 2026-08-16 the
 // field it sets was read in two places and assigned in none, so ModeTournament
 // was permanently off. See tournamentwatch.go.

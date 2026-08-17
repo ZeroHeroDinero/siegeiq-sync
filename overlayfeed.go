@@ -58,6 +58,25 @@ func overlayFocusLine() string {
 	return out.Line
 }
 
+// overlayPreview draws the reminder on demand.
+//
+// This exists because the only other way to find out whether the overlay renders
+// on a given machine was to play a whole match and hope. That is a terrible
+// feedback loop for a feature whose entire job is to appear correctly over a game,
+// and it is the reason nobody could tell "switched off" apart from "broken".
+//
+// It ignores the on/off setting on purpose: it answers "does this draw on my PC",
+// which is a question worth answering even when the feature is turned off.
+func overlayPreview() {
+	line := overlayFocusLine()
+	if line == "" {
+		// No focus chosen yet, or not linked. Still worth drawing something, because
+		// the point of this button is to prove the window appears.
+		line = "This is where your focus appears between rounds."
+	}
+	overlayShowForced(line)
+}
+
 // overlayRoundEnded is called when a new .rec appears in a match folder.
 //
 // Rate limited to once a minute. A round cannot end twice in that window, so this

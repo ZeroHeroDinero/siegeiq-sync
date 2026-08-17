@@ -83,24 +83,16 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      # /DNoRecorder is REQUIRED here and is not a workaround.
-      #
-      # ffmpeg.exe is ~100MB and gitignored, so it exists only on the release
-      # machine. The .iss stops the compile with an #error when it is missing,
-      # deliberately, because an installer that silently ships without the recorder
-      # is how a player ends up being told "No capture engine" with no way to fix
-      # it. CI can never have the file, so CI says out loud that it is building a
-      # sync-only installer instead of tripping the guard on every single push.
-      - name: Build installer (sync-only, no recorder)
+      - name: Build installer
         shell: pwsh
-        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DNoRecorder installer\siegeiq-sync.iss'
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\siegeiq-sync.iss'
 
       # --- Sign the finished installer. No-op until SIGN_ENABLED is true. ---
-      - name: Upload unsigned installer (sync-only, NOT shippable)
+      - name: Upload unsigned installer (input for signing)
         id: setup_artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SiegeIQSync-setup-SYNC-ONLY-do-not-ship
+          name: SiegeIQSync-setup-unsigned
           path: installer/dist/SiegeIQSync-Setup.exe
           if-no-files-found: error
 
@@ -137,25 +129,13 @@ jobs:
             SHA256SUMS.txt
           if-no-files-found: error
 
-      # --- PUBLISHING FROM CI IS DISABLED, ON PURPOSE. ---
-      #
-      # This step used to publish a Release on any v* tag. It never fired, because
-      # the installer build above failed first for want of ffmpeg.exe - which is the
-      # only reason it never did damage.
-      #
-      # RELEASE_SYNC.bat publishes with `gh release create`, and a tag created that
-      # way DOES trigger this workflow. So the moment the installer step was made to
-      # compile, this step would have run straight afterwards and uploaded a
-      # recorder-less installer over the good one, on every single release. The
-      # player-facing symptom is "No capture engine" on a fresh install, which is
-      # the exact bug the #error guard in the .iss was written to prevent.
-      #
-      # CI is a COMPILE CHECK here and nothing more. Releases are cut from the
-      # machine that has ffmpeg.exe. Do not re-enable this without solving how CI
-      # gets a legitimate copy of ffmpeg first.
-      - name: Release publishing is intentionally disabled in CI
+      # --- On a version tag (e.g. v0.3.0), publish a GitHub Release ---
+      - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          echo "This workflow does not publish releases."
-          echo "CI cannot bundle ffmpeg.exe, so any installer it builds is sync-only."
-          echo "Cut releases with RELEASE_SYNC.bat on the machine that has ffmpeg.exe."
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer/dist/SiegeIQSync-Setup.exe
+            SiegeIQSync.exe
+            SHA256SUMS.txt
+          generate_release_notes: true
