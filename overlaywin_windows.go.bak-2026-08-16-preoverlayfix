@@ -87,6 +87,10 @@ const (
 
 	transparentBk = 1
 
+	// The colour key. Any pixel painted exactly this colour becomes a hole in the
+	// window. Magenta because nothing in the design will ever legitimately be it.
+	colourKey = 0x00FF00FF
+
 	overlayW = 460
 	overlayH = 74
 )
@@ -142,21 +146,17 @@ func overlayShowForced(line string) {
 	if line == "" {
 		return
 	}
-	if !ensureOverlayThread() {
-		return
-	}
+	ensureOverlayThread()
 
 	ovMu.Lock()
 	ovText = line
 	hwnd := ovHwnd
 	ovMu.Unlock()
 	if hwnd == 0 {
-		logf("overlay: no window handle, nothing drawn")
 		return
 	}
 
-	x, y := positionOverlayAt(hwnd)
-	logf("overlay: drawing at %d,%d (%dx%d): %s", x, y, overlayW, overlayH, line)
+	positionOverlay(hwnd)
 	procInvalidateRect.Call(hwnd, 0, 1)
 	procShowWindow.Call(hwnd, swShowNA)
 	setOverlayAlpha(hwnd, 255)
@@ -178,66 +178,35 @@ func fadeOverlay(hwnd uintptr) {
 	procShowWindow.Call(hwnd, swHide)
 }
 
-// setOverlayAlpha uses LWA_ALPHA ONLY.
-//
-// The first version also passed LWA_COLORKEY, which did nothing useful: paintOverlay
-// filled the window with the key colour and then filled the whole window again with
-// the panel colour, so not one keyed pixel survived to be made transparent. Two
-// mechanisms where one will do is how a window ends up invisible for a reason nobody
-// can find. The card is a solid rectangle and the alpha fades it.
 func setOverlayAlpha(hwnd uintptr, a byte) {
-	procSetLayeredWinAttr.Call(hwnd, 0, uintptr(a), lwaAlpha)
+	procSetLayeredWinAttr.Call(hwnd, uintptr(colourKey), uintptr(a), lwaAlpha|lwaColKey)
 }
 
 // positionOverlay parks the window over Siege's own client area, low and left,
 // where Siege itself draws nothing important between rounds.
-// positionOverlayAt parks the window over Siege's client area, low and left, and
-// reports where it put it so the log can prove it is not off-screen.
-func positionOverlayAt(hwnd uintptr) (int32, int32) {
+func positionOverlay(hwnd uintptr) {
 	x, y := int32(60), int32(60)
 	if sh, ok := siegeWindow(); ok {
 		if r, err := clientRectOnScreen(sh); err == nil {
-			nx := int32(r.X + 48)
-			ny := int32(r.Y + r.H - overlayH - 130)
-			// A minimised or freshly-restored game reports nonsense coordinates, and
-			// a window placed at -32000 is invisible with no error anywhere.
-			if nx > -10000 && ny > -10000 {
-				x, y = nx, ny
-			}
+			x = int32(r.X + 48)
+			y = int32(r.Y + r.H - overlayH - 130)
 		}
 	}
 	procSetWindowPos.Call(hwnd, hwndTopmost, uintptr(x), uintptr(y),
 		uintptr(overlayW), uintptr(overlayH), swpNoActivate)
-	return x, y
 }
 
-// ensureOverlayThread starts the window thread and WAITS for the window to exist.
-//
-// This used to start the goroutine and sleep 250ms. Registering a window class and
-// creating a window can take longer than that on a cold start, and when it did,
-// overlayShow read a zero handle and returned without drawing OR logging anything.
-// The symptom was the first press of the button doing nothing at all and a second
-// press working, which reads exactly like "the feature is broken".
-func ensureOverlayThread() bool {
+func ensureOverlayThread() {
 	ovMu.Lock()
-	if !ovStarted {
-		ovStarted = true
+	if ovStarted {
 		ovMu.Unlock()
-		go overlayThread()
-	} else {
-		ovMu.Unlock()
+		return
 	}
-	for i := 0; i < 60; i++ { // up to three seconds
-		ovMu.Lock()
-		h := ovHwnd
-		ovMu.Unlock()
-		if h != 0 {
-			return true
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	logf("overlay: the window did not come up within three seconds")
-	return false
+	ovStarted = true
+	ovMu.Unlock()
+	go overlayThread()
+	// Give the window a moment to exist before the first show tries to use it.
+	time.Sleep(250 * time.Millisecond)
 }
 
 // overlayThread owns the window for the life of the app.
@@ -264,15 +233,12 @@ func overlayThread() {
 		return r
 	})
 
-	// The class background is the card colour, so an unpainted frame looks like the
-	// card rather than flashing white. It was the transparency key until that
-	// mechanism was removed for doing nothing. #070F1B as 0x00BBGGRR.
-	panelBrush, _, _ := procCreateSolidBrush.Call(uintptr(0x001B0F07))
+	keyBrush, _, _ := procCreateSolidBrush.Call(uintptr(colourKey))
 	wc := wndClassExW{
 		cbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
 		lpfnWndProc:   wndProc,
 		hInstance:     hInst,
-		hbrBackground: panelBrush,
+		hbrBackground: keyBrush,
 		lpszClassName: className,
 	}
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
@@ -316,6 +282,13 @@ func paintOverlay(hwnd uintptr) {
 	ovMu.Lock()
 	line := ovText
 	ovMu.Unlock()
+
+	full := rectW{0, 0, overlayW, overlayH}
+	// Everything outside the card is painted the key colour, which the OS turns
+	// into a hole. That is what makes this a floating card rather than a box.
+	keyBrush, _, _ := procCreateSolidBrush.Call(uintptr(colourKey))
+	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&full)), keyBrush)
+	procDeleteObject.Call(keyBrush)
 
 	// COLORREF is 0x00BBGGRR, not RGB. Getting this backwards is the classic way
 	// to end up with an orange panel where a blue one was intended.
