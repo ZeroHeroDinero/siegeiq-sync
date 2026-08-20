@@ -79,19 +79,6 @@ func onReady() {
 		"A short chime when a match uploads, a sharper one if it fails", prefSound)
 	mToast := systray.AddMenuItemCheckbox("Show a notification on upload",
 		"A tray balloon when a match uploads. Never steals focus from the game", prefToast)
-	// Settings sharing. Two switches, both off until asked, plus a way to see
-	// the actual file rather than take our word for what is in it.
-	prefAim, prefPerf, _ := settingsSharePrefs()
-	setSettingsAimOn(prefAim)
-	setSettingsPerfOn(prefPerf)
-	mShare := systray.AddMenuItem("Share my Siege settings",
-		"Let coaching read your in-game settings. Both off unless you switch them on")
-	mShareAim := mShare.AddSubMenuItemCheckbox("Aim settings",
-		"Sensitivity, ADS, FOV and raw input, so coaching can tell you when a sens change hurt your aim", prefAim)
-	mSharePerf := mShare.AddSubMenuItemCheckbox("Performance settings",
-		"Graphics and display quality only. Never your hardware details or your account", prefPerf)
-	mShareWhat := mShare.AddSubMenuItem("Show me the file it reads",
-		"Opens your GameSettings.ini so you can see exactly what is in it")
 	mUpdate := systray.AddMenuItem("Check for updates", "Check siegeiq.gg for a newer version")
 	mOpenSite := systray.AddMenuItem("Open siegeiq.gg", "Open your SiegeIQ profile")
 	mViewLog := systray.AddMenuItem("View log", "Open the plain-text sync log")
@@ -107,7 +94,6 @@ func onReady() {
 
 	go recMenu.run()
 	go runSync(mStatus, mStartup)
-	go startSettingsWatch()
 
 	go func() {
 		for {
@@ -162,43 +148,6 @@ func onReady() {
 				}
 				saveNotifyPrefs()
 				logf("upload notification turned %v from the tray", onOff(on))
-
-			case <-mShareAim.ClickedCh:
-				on := !mShareAim.Checked()
-				setSettingsAimOn(on)
-				if on {
-					mShareAim.Check()
-				} else {
-					mShareAim.Uncheck()
-				}
-				saveSettingsSharePrefs(-1)
-				logf("aim settings sharing turned %v from the tray", onOff(on))
-
-			case <-mSharePerf.ClickedCh:
-				on := !mSharePerf.Checked()
-				setSettingsPerfOn(on)
-				if on {
-					mSharePerf.Check()
-				} else {
-					mSharePerf.Uncheck()
-				}
-				saveSettingsSharePrefs(-1)
-				logf("performance settings sharing turned %v from the tray", onOff(on))
-
-			case <-mShareWhat.ClickedCh:
-				// Disk access and a possible dialog: off the event loop so the
-				// menu cannot freeze while Notepad starts.
-				go func() {
-					if p := settingsFileForPlayer(); p != "" {
-						openInNotepad(p)
-					} else {
-						showDialog(dialogSpec{
-							instruction: "Could not find your Siege settings file",
-							content:     "Sync looks for GameSettings.ini next to your replay folder. Launch Siege once and try again.",
-							buttonText:  "Close",
-						})
-					}
-				}()
 
 			case <-mUpdate.ClickedCh:
 				// Network + a dialog: run off the event loop so the menu stays responsive.

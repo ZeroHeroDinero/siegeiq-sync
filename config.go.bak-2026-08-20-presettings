@@ -17,7 +17,7 @@ import (
 // backend is the SiegeIQ API root. version is the running build - keep it in
 // lockstep with winres/winres.json and the installer's AppVersion.
 const backend = "https://siegeiq-backend-production.up.railway.app"
-const version = "1.5.7"
+const version = "1.5.6"
 
 const (
 	scanEvery = 20 * time.Second // how often the watch loop rescans the replay folder
@@ -72,19 +72,6 @@ type config struct {
 	// into the defaults - so upgrading does not require the player to do
 	// anything, and downgrading leaves the block harmlessly ignored.
 	Recorder recorderConfig `json:"recorder"`
-
-	// Settings sharing. Stored as ON switches, which is the opposite of every
-	// other preference in this file, and deliberately so: an absent key here
-	// must mean OFF. Reading a player's GameSettings.ini because their config
-	// predates the feature and therefore has no opinion is not a default worth
-	// shipping. See settingsshare.go.
-	SettingsAimOn  bool `json:"settings_aim_on,omitempty"`
-	SettingsPerfOn bool `json:"settings_perf_on,omitempty"`
-
-	// MouseDPI is typed by the player and is optional. GameSettings.ini has no
-	// DPI key at any Siege version - the game cannot see it - so eDPI and cm/360
-	// stay empty until this is filled in. Zero means not stated.
-	MouseDPI int `json:"mouse_dpi,omitempty"`
 
 	// WindowShown records that the app window has been opened at least once.
 	// A fresh install opens it automatically so somebody who has just run the

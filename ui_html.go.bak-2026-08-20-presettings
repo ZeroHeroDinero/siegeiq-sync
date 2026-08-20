@@ -452,16 +452,6 @@ button.wide{width:100%;justify-content:center}
   <p class="hint">SiegeIQ Sync watches one folder for the replay files Siege writes itself, and
   records your screen only while Siege is running. It never reads the game&#39;s memory, never
   touches the game process, and opens no network ports. Clips stay on this PC until you send one.</p>
-  <h2 style="margin-top:26px">Share your Siege settings</h2>
-  <p class="hint">Both of these are off until you switch them on. Sync reads one file,
-  <code id="share-file">GameSettings.ini</code>, and only the parts you tick below. Turning
-  them off stops it reading anything at all. The same switches are on the tray menu.</p>
-  <div class="grid2" id="sharefields"></div>
-  <div class="row">
-    <button class="primary" onclick="saveShare()">Save</button>
-    <button onclick="openSettingsFile()">Show me the file</button>
-  </div>
-
   <div class="grid2" id="aboutgrid"></div>
   <div class="row">
     <button onclick="go(&#39;goOpenLog&#39;)">View log</button>
@@ -640,7 +630,6 @@ function refresh(){
   goJ("goStatus").then(function(s){ if(s){S=s;paintStatus();} });
   goJ("goSettings").then(function(x){ if(x){settings=x;paintOptions();paintFields();} });
   goJ("goSoundPrefs").then(function(x){ if(x){SND=x;paintSounds();} });
-  goJ("goSharePrefs").then(function(x){ if(x){SHARE=x;paintShare();} });
   loadClips();
 }
 
@@ -1309,35 +1298,6 @@ function txt(k,label,val,placeholder){
    esc(val==null?"":val)+'" placeholder="'+esc(placeholder)+
    '" oninput="SND[\''+k+'\']=this.value"><div class="h">Leave empty for the built-in sound.</div></div>';
 }
-var SHARE={};
-function paintShare(){
-  var el=document.getElementById("sharefields");
-  if(!el) return;
-  el.innerHTML=
-     shareSel("aim_on","Aim settings",SHARE.aim_on,"Sensitivity, ADS, FOV and raw input. This is the part that lets coaching tell you when a sens change cost you.")
-    +shareSel("perf_on","Performance settings",SHARE.perf_on,"Graphics and display quality only. Never your hardware details, never your account.")
-    +shareNum("mouse_dpi","Mouse DPI",SHARE.mouse_dpi,"Optional. Siege does not store your DPI anywhere, so without this there is no eDPI to compare.");
-  var f=document.getElementById("share-file");
-  if(f) f.textContent=SHARE.file?SHARE.file:"not found yet - launch Siege once";
-}
-function shareSel(k,label,val,hint){
-  var on=val?"on":"off";
-  var o=["off","on"].map(function(x){return '<option value="'+x+'"'+(x===on?" selected":"")+'>'+x+'</option>';}).join("");
-  return '<div class="fld"><label>'+label+'</label><select onchange="SHARE[\''+k+'\']=(this.value===\'on\')">'+o+
-   '</select><div class="h">'+hint+'</div></div>';
-}
-function shareNum(k,label,val,hint){
-  return '<div class="fld"><label>'+label+'</label><input type="text" inputmode="numeric" spellcheck="false" value="'+
-   esc(val?String(val):"")+'" placeholder="800" oninput="SHARE[\''+k+'\']=parseInt(this.value,10)||0"><div class="h">'+hint+'</div></div>';
-}
-function saveShare(){
-  go("goSaveSharePrefs",JSON.stringify({aim_on:!!SHARE.aim_on,perf_on:!!SHARE.perf_on,mouse_dpi:SHARE.mouse_dpi||0}))
-    .then(function(err){ toast(err?err:"Saved."); refresh(); });
-}
-function openSettingsFile(){
-  go("goOpenSettingsFile","").then(function(err){ if(err) toast(err); });
-}
-
 function saveSounds(){
   go("goSaveSoundPrefs",JSON.stringify(SND)).then(function(err){
     toast(err?err:"Saved. That is what it will sound like.");

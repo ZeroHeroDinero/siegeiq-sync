@@ -370,67 +370,6 @@ func apiSaveSoundPrefs(raw string) string {
 	return ""
 }
 
-// sharePrefs is the settings-sharing block the app window reads and writes.
-// Kept separate from recorderConfig on purpose: these live on config, not on the
-// recorder, and folding them in would mean a recorder settings save could
-// silently rewrite a consent switch.
-type sharePrefs struct {
-	AimOn    bool   `json:"aim_on"`
-	PerfOn   bool   `json:"perf_on"`
-	MouseDPI int    `json:"mouse_dpi"`
-	File     string `json:"file"`
-}
-
-func apiSharePrefs() sharePrefs {
-	defer traceBridge("sharePrefs")()
-	var c config
-	loadJSON(configPath(), &c)
-	return sharePrefs{
-		AimOn:    c.SettingsAimOn,
-		PerfOn:   c.SettingsPerfOn,
-		MouseDPI: c.MouseDPI,
-		// The real path, shown in the window. Somebody deciding whether to switch
-		// this on should be able to see the exact file rather than a description
-		// of it, and an empty string here is the honest answer when Siege has
-		// never been run on this machine.
-		File: gameSettingsPath(c.ReplayDir),
-	}
-}
-
-// apiSaveSharePrefs stores the two consent switches and the DPI, and mirrors the
-// switches into the atomics the tray and the poller read, so the tray checkbox
-// and this window can never end up disagreeing.
-func apiSaveSharePrefs(raw string) string {
-	defer traceBridge("saveSharePrefs")()
-	var in sharePrefs
-	if err := json.Unmarshal([]byte(raw), &in); err != nil {
-		return "could not read those settings: " + err.Error()
-	}
-	// A DPI outside this range is a typo, not a mouse. Clamping to zero rather
-	// than rejecting keeps the save working and simply leaves eDPI blank.
-	if in.MouseDPI < 100 || in.MouseDPI > 32000 {
-		in.MouseDPI = 0
-	}
-	setSettingsAimOn(in.AimOn)
-	setSettingsPerfOn(in.PerfOn)
-	saveSettingsSharePrefs(in.MouseDPI)
-	logf("settings sharing: aim=%v perf=%v dpi=%d (from the app window)", in.AimOn, in.PerfOn, in.MouseDPI)
-	beepClip(true)
-	return ""
-}
-
-// apiOpenSettingsFile shows the player the file itself. The strongest answer to
-// "what are you reading" is the actual bytes.
-func apiOpenSettingsFile(string) string {
-	defer traceBridge("openSettingsFile")()
-	p := settingsFileForPlayer()
-	if p == "" {
-		return "Could not find your Siege settings file. Launch Siege once and try again."
-	}
-	openInNotepad(p)
-	return ""
-}
-
 func apiSaveSettings(raw string) string {
 	var incoming recorderConfig
 	if err := json.Unmarshal([]byte(raw), &incoming); err != nil {
