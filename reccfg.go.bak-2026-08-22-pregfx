@@ -163,9 +163,6 @@ type recorderConfig struct {
 	//   auto     - try the fast GPU path, fall back on its own
 	//   ddagrab  - force the fast GPU path
 	//   gdigrab  - force the slower window-capture path, which needs no GPU
-	//   gfxcapture - force the WinRT window-native path, which keeps recording
-	//              while Siege is behind another window. Ignored when this
-	//              machine's ffmpeg has no gfxcapture source.
 	//              cooperation at all and is the one that works when nothing else does
 	CaptureMethod string `json:"capture_method"`
 }
@@ -315,7 +312,7 @@ func (rc *recorderConfig) normalise() {
 		rc.Adapter = -1
 	}
 	switch rc.CaptureMethod {
-	case "auto", "ddagrab", "gdigrab", "gfxcapture":
+	case "auto", "ddagrab", "gdigrab":
 	default:
 		rc.CaptureMethod = d.CaptureMethod
 	}

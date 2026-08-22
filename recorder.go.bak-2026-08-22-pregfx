@@ -353,25 +353,6 @@ func (r *recorder) shouldCapture() (bool, string) {
 	// Windows notification, a Discord popup, the game's own alt-tab handling.
 	// Stopping and restarting ffmpeg on every flicker would churn processes all
 	// evening and punch holes in footage nobody actually left.
-	// A window-native backend captures Siege's OWN composited output rather than
-	// the screen Siege happens to be drawn on. Nothing else on the desktop can
-	// reach a frame, so there is nothing left to protect the player from and no
-	// reason to stop when they alt-tab. That is the entire point of that path.
-	//
-	// noteFocusedNow is still called so focuslog stays empty: with no unfocused
-	// windows recorded, excludeUnfocused has nothing to trim, and a clip is no
-	// longer cut in half because somebody checked Discord in the middle of it.
-	r.mu.Lock()
-	rcNow := r.rc
-	r.mu.Unlock()
-	if captureIsWindowNative(rcNow) {
-		noteFocusedNow(time.Now())
-		r.mu.Lock()
-		r.unfocusedSince = time.Time{}
-		r.mu.Unlock()
-		return true, ""
-	}
-
 	if siegeInForeground() {
 		r.mu.Lock()
 		r.unfocusedSince = time.Time{}
@@ -564,7 +545,6 @@ func (r *recorder) tick() {
 		MonitorIndex: monitor,
 		WindowTitle:  title,
 		Crop:         crop,
-		WindowHandle: siegeWindowHandle(),
 		FPS:          rc.FPS,
 		HeightCap:    rc.HeightCap,
 		Encoder:      rc.Encoder,

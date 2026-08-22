@@ -53,13 +53,6 @@ type captureSpec struct {
 	WindowTitle  string
 	Crop         captureRect
 
-	// WindowHandle is Siege's top-level window, as a plain uintptr so this file
-	// stays free of Windows types. Only a window-native backend uses it, and it
-	// is the whole reason such a backend can keep filming while the player is
-	// looking at something else. Zero means "not known", which forces every
-	// backend back onto MonitorIndex and Crop.
-	WindowHandle uintptr
-
 	// How to encode. HeightCap of 0 means "do not downscale".
 	FPS       int
 	HeightCap int

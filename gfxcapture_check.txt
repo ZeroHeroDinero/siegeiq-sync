@@ -1,0 +1,43 @@
+Filter gfxcapture
+  Capture graphics/screen content as a video source
+    Inputs:
+        none (source filter)
+    Outputs:
+       #0: default (video)
+gfxcapture AVOptions:
+   window_title      <string>     ..FV....... ECMAScript regular expression to match against the window title. Supports PCRE style (?i) prefix for case-insensitivity.
+   window_class      <string>     ..FV....... as window_title, but against the window class
+   window_exe        <string>     ..FV....... as window_title, but against the windows executable name
+   monitor_idx       <int>        ..FV....... index of the monitor to capture (from -2 to INT_MAX) (default -2)
+     window          -1           ..FV....... derive from selected window
+   capture_cursor    <boolean>    ..FV....... capture mouse cursor (default true)
+   capture_border    <boolean>    ..FV....... capture full window border (default false)
+   display_border    <boolean>    ..FV....... display yellow border around captured window (default false)
+   max_framerate     <video_rate> ..FV....... set maximum capture frame rate (default "60")
+   hwnd              <uint64>     ..FV....... pre-existing HWND handle (from 0 to 1.84467e+19) (default 0)
+   hmonitor          <uint64>     ..FV....... pre-existing HMONITOR handle (from 0 to 1.84467e+19) (default 0)
+   width             <int>        ..FV....... force width of the output frames, negative values round down the width to the nearest multiple of that number (from INT_MIN to INT_MAX) (default 0)
+   height            <int>        ..FV....... force height of the output frames, negative values round down the height to the nearest multiple of that number (from INT_MIN to INT_MAX) (default 0)
+   crop_left         <int>        ..FV....... number of pixels to crop from the left of the captured area (from 0 to INT_MAX) (default 0)
+   crop_top          <int>        ..FV....... number of pixels to crop from the top of the captured area (from 0 to INT_MAX) (default 0)
+   crop_right        <int>        ..FV....... number of pixels to crop from the right of the captured area (from 0 to INT_MAX) (default 0)
+   crop_bottom       <int>        ..FV....... number of pixels to crop from the bottom of the captured area (from 0 to INT_MAX) (default 0)
+   premultiplied     <boolean>    ..FV....... return premultiplied alpha frames (default false)
+   resize_mode       <int>        ..FV....... capture source resize behavior (from 0 to 2) (default crop)
+     crop            0            ..FV....... crop or add black bars into frame
+     scale           1            ..FV....... scale source to fit initial size
+     scale_aspect    2            ..FV....... scale source to fit initial size while preserving aspect ratio
+   scale_mode        <int>        ..FV....... scaling algorithm (from 0 to 2) (default bilinear)
+     point           0            ..FV....... use point scaling
+     bilinear        1            ..FV....... use bilinear scaling
+     bicubic         2            ..FV....... use bicubic scaling
+   output_fmt        <int>        ..FV....... desired output format (from 0 to INT_MAX) (default 8bit)
+     8bit            28           ..FV....... output default 8 Bit format
+     bgra            28           ..FV....... output 8 Bit BGRA
+     10bit           195          ..FV....... output default 10 Bit format
+     x2bgr10         195          ..FV....... output 10 Bit X2BGR10
+     16bit           207          ..FV....... output default 16 Bit format
+     rgbaf16         207          ..FV....... output 16 Bit RGBAF16
+
+
+Exiting with exit code 0

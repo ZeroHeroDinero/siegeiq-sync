@@ -201,10 +201,7 @@ func (r *recorder) watchProgress(rc recorderConfig) bool {
 
 	// Stalled. Which path was it, and is there a better one left to try?
 	backend := sess.Backend()
-	// Both of the clever paths fall back to the same dependable one. gfxcapture
-	// is included here for the same reason ddagrab was: a path that produces no
-	// frames must hand over rather than sit there looking alive.
-	onGPU := strings.Contains(backend, "ddagrab") || strings.Contains(backend, "gfxcapture")
+	onGPU := strings.Contains(backend, "ddagrab")
 	stalledFor := time.Since(grewAt).Round(time.Second)
 
 	logf("recorder: STALLED - %s has produced no video for %s. "+

@@ -17,27 +17,14 @@
 // obligation on Sync itself) and it means a wedged encoder cannot take the tray
 // app down with it.
 //
-// THREE CAPTURE PATHS, IN ORDER OF PREFERENCE
+// TWO CAPTURE PATHS, IN ORDER OF PREFERENCE
 //
-//  1. gfxcapture - WinRT Windows Graphics Capture, pointed at Siege's own
-//     window handle. It captures that window's composited output whether or
-//     not it is the window in front, which is what lets recording carry on
-//     while the player is in Discord or a browser. Nothing outside the game
-//     window can reach a frame, so there is no crop and no way for the desktop
-//     to leak into a clip even in borderless. Needs Windows 10 2004 or newer
-//     and an FFmpeg built with the source, so it is asked for rather than
-//     assumed - see probeGfxCapture.
-//
-//     It cannot capture a MINIMIZED window, which is what exclusive fullscreen
-//     does on alt-tab. Borderless is the mode this helps.
-//
-//  2. ddagrab - DXGI Desktop Duplication. GPU-side, low overhead, works with
+//  1. ddagrab - DXGI Desktop Duplication. GPU-side, low overhead, works with
 //     fullscreen exclusive DirectX. It captures a DISPLAY, so we crop to the
 //     Siege window rectangle. When Siege is fullscreen (how nearly everyone
-//     plays) the crop is the whole display and costs nothing. Because it hands
-//     back the desktop, recording MUST pause when Siege is not in front.
+//     plays) the crop is the whole display and costs nothing.
 //
-//  3. gdigrab with title= - true single-window capture, but CPU-side and
+//  2. gdigrab with title= - true single-window capture, but CPU-side and
 //     noticeably heavier. This is the fallback for machines whose FFmpeg build
 //     has no ddagrab, and it is the path that captures ONLY the game window
 //     with no cropping involved at all.
@@ -71,21 +58,6 @@ func (ffmpegBackend) Name() string { return "ffmpeg" }
 type ffmpegCaps struct {
 	Path       string
 	HasDdagrab bool
-
-	// The WinRT window-native path. Every one of these is MEASURED, not read
-	// off a feature list, for the reason spelled out above encoderUsable.
-	// GfxOpts records which option names this binary's own help text listed;
-	// GfxHWFrames whether frames arrive on the GPU and need pulling down;
-	// GfxBorderOff and GfxCursorOff whether those two options were accepted
-	// when actually passed. GfxWhy carries the reason it is unavailable in
-	// words that can be shown to a player.
-	HasGfxCapture bool
-	GfxHWFrames   bool
-	GfxBorderOff  bool
-	GfxCursorOff  bool
-	GfxOpts       map[string]bool
-	GfxWhy        string
-
 	HasNVENC   bool
 	HasAMF     bool
 	HasQSV     bool
@@ -343,13 +315,8 @@ func warmCaptureCaps(rc recorderConfig) {
 			warmMu.Unlock()
 
 			if caps != nil {
-				logf("recorder: capture engine ready - %s (window-native grab: %v, GPU grab: %v, "+
-					"nvenc: %v, amf: %v, qsv: %v)",
-					caps.Version, caps.HasGfxCapture, caps.HasDdagrab,
-					caps.HasNVENC, caps.HasAMF, caps.HasQSV)
-				if !caps.HasGfxCapture && caps.GfxWhy != "" {
-					logf("recorder: recording will still pause on alt-tab - %s", caps.GfxWhy)
-				}
+				logf("recorder: capture engine ready - %s (GPU grab: %v, nvenc: %v, amf: %v, qsv: %v)",
+					caps.Version, caps.HasDdagrab, caps.HasNVENC, caps.HasAMF, caps.HasQSV)
 			} else {
 				logf("recorder: no usable capture engine - %s", errText)
 			}
@@ -400,7 +367,6 @@ func probeFFmpeg(path string) (*ffmpegCaps, error) {
 	if out, err := runFFmpegText(path, "-hide_banner", "-filters"); err == nil {
 		c.HasDdagrab = strings.Contains(out, "ddagrab")
 	}
-	probeGfxCapture(path, c)
 	if out, err := runFFmpegText(path, "-hide_banner", "-encoders"); err == nil {
 		c.HasX264 = strings.Contains(out, "libx264")
 
@@ -428,79 +394,6 @@ func probeFFmpeg(path string) (*ffmpegCaps, error) {
 
 	capsCache[path] = c
 	return c, nil
-}
-
-// probeGfxCapture answers three separate questions about the WinRT window
-// capture source, and asks the binary rather than assuming any of them.
-//
-// The source is recent enough that its option NAMES cannot be taken on trust,
-// so they are read out of this ffmpeg's own help text and anything absent is
-// simply never passed. Then it is run for two frames against a display, which
-// needs no Siege window, to find out whether frames arrive on the GPU: passing
-// hwdownload on system frames is a hard error and so is omitting it on GPU
-// frames, so exactly one of the two attempts survives.
-//
-// Cost is up to four short launches, once, on the warm-up goroutine. That is
-// the same trade encoderUsable makes, and for the same reason: a guess that
-// looks like a fact is what produces a recorder that starts and records black.
-func probeGfxCapture(path string, c *ffmpegCaps) {
-	out, err := runFFmpegText(path, "-hide_banner", "-h", "filter=gfxcapture")
-	if err != nil || strings.Contains(out, "Unknown filter") ||
-		!strings.Contains(out, "hwnd") {
-		c.GfxWhy = "this ffmpeg has no usable gfxcapture source"
-		return
-	}
-	// Read off ffmpeg 9.0's own option table on 22 August 2026. The first draft
-	// of this file guessed capture_hwnd, capture_hmonitor and frame_rate, and
-	// every one of those guesses was wrong - the real names are below. The guess
-	// cost nothing only because this check exists, which is the argument for it.
-	c.GfxOpts = map[string]bool{}
-	for _, name := range []string{"hwnd", "monitor_idx", "capture_cursor",
-		"display_border", "max_framerate", "output_fmt"} {
-		if strings.Contains(out, name) {
-			c.GfxOpts[name] = true
-		}
-	}
-	if !c.GfxOpts["monitor_idx"] {
-		// Without a display target there is nothing to rehearse against, and a
-		// rehearsal against the live game window is not something to do while
-		// somebody is playing. Leave the path off rather than find out mid-round.
-		c.GfxWhy = "gfxcapture cannot be tested on this build"
-		return
-	}
-
-	twoFrames := func(chain string) bool {
-		_, err := runFFmpegText(path, "-hide_banner", "-loglevel", "error",
-			"-filter_complex", chain+"[v]", "-map", "[v]",
-			"-frames:v", "2", "-f", "null", "-")
-		return err == nil
-	}
-
-	base := "gfxcapture=monitor_idx=0"
-	switch {
-	case twoFrames(base + ",hwdownload,format=bgra"):
-		c.HasGfxCapture, c.GfxHWFrames = true, true
-	case twoFrames(base + ",format=bgra"):
-		c.HasGfxCapture, c.GfxHWFrames = true, false
-	default:
-		c.GfxWhy = "gfxcapture is present but produced no frames on this machine"
-		return
-	}
-
-	tail := ",format=bgra"
-	if c.GfxHWFrames {
-		tail = ",hwdownload,format=bgra"
-	}
-	// display_border is the one a player would notice: with it on, Windows
-	// paints a yellow frame round the game for as long as capture runs. On
-	// ffmpeg 9.0 it already defaults to off, and it is still passed explicitly
-	// rather than relied on, because a default is somebody else's decision.
-	if c.GfxOpts["display_border"] {
-		c.GfxBorderOff = twoFrames(base + ":display_border=false" + tail)
-	}
-	if c.GfxOpts["capture_cursor"] {
-		c.GfxCursorOff = twoFrames(base + ":capture_cursor=false" + tail)
-	}
 }
 
 func (b ffmpegBackend) Available(rc recorderConfig) (bool, string) {
@@ -664,14 +557,8 @@ func encoderArgs(caps *ffmpegCaps, rc recorderConfig) (name string, args []strin
 // So the device is now NAMED and bound explicitly to the filters with
 // -filter_hw_device. That also stops the encoder inheriting a device it cannot
 // use, which was the other candidate for the same failure.
-func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, mode string, loop *loopbackCapture) []string {
+func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, useDDA bool, loop *loopbackCapture) []string {
 	args := []string{"-hide_banner", "-loglevel", "warning"}
-
-	// Both clever paths produce video from a FILTER SOURCE rather than from an
-	// -i, so every downstream decision - the audio input index, the stream
-	// mapping - depends on that and not on which of them is in use. Only
-	// gdigrab has a real video input.
-	fromFilter := mode != "gdigrab"
 
 	// Sound, if this PC turned out to have a device that carries it. Only a
 	// device that has already been opened and proven gets this far, because a
@@ -691,31 +578,7 @@ func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, mode strin
 	}
 
 	var filters []string
-	switch mode {
-	case "gfxcapture":
-		// Pointed at Siege's own window, so there is no crop and nothing else on
-		// the desktop can appear. Every option below is passed ONLY if this
-		// ffmpeg listed it and, for the two that change behaviour, only if it
-		// was accepted when tried. See probeGfxCapture.
-		opts := []string{fmt.Sprintf("hwnd=%d", spec.WindowHandle)}
-		if caps.GfxOpts["max_framerate"] {
-			opts = append(opts, fmt.Sprintf("max_framerate=%d", spec.FPS))
-		}
-		if caps.GfxCursorOff {
-			opts = append(opts, "capture_cursor=false")
-		}
-		if caps.GfxBorderOff {
-			// Windows paints a yellow frame around a captured window when this
-			// is on. Every SiegeIQ player would be looking at it.
-			opts = append(opts, "display_border=false")
-		}
-		filters = append(filters, "gfxcapture="+strings.Join(opts, ":"))
-		if caps.GfxHWFrames {
-			filters = append(filters, "hwdownload")
-		}
-		filters = append(filters, "format=bgra")
-
-	case "ddagrab":
+	if useDDA {
 		// A named device, optionally pinned to a specific adapter, and handed to
 		// the filter graph only.
 		dev := "d3d11va=dda"
@@ -732,7 +595,7 @@ func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, mode strin
 			filters = append(filters, fmt.Sprintf("crop=%d:%d:%d:%d",
 				spec.Crop.W, spec.Crop.H, spec.Crop.X, spec.Crop.Y))
 		}
-	default:
+	} else {
 		// gdigrab captures the named window directly - no crop needed, and
 		// nothing outside the game window is ever read. Slower, but it asks
 		// nothing of the GPU, which is why it is the reliable fallback.
@@ -755,7 +618,7 @@ func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, mode strin
 	// packets while the video thread is busy.
 	audioIdx := 0
 	if withAudio {
-		if !fromFilter {
+		if !useDDA {
 			audioIdx = 1
 		}
 		if useLoop {
@@ -774,7 +637,7 @@ func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, mode strin
 	}
 	filters = append(filters, "format=yuv420p")
 
-	if fromFilter {
+	if useDDA {
 		args = append(args, "-filter_complex", strings.Join(filters, ",")+"[v]", "-map", "[v]")
 	} else if withAudio {
 		// Explicit rather than relying on ffmpeg's default stream selection.
@@ -815,49 +678,6 @@ func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, mode strin
 		filepath.Join(spec.SegmentDir, segmentPattern),
 	)
 	return args
-}
-
-// captureMode picks the path, preferring the one that captures the game rather
-// than the screen the game is drawn on.
-//
-// gfxcapture wins whenever it is available and a window handle is known, and
-// not only for the alt-tab behaviour: it is the only path where the desktop
-// physically cannot end up in a clip, which is a promise the other two keep by
-// pausing rather than by construction.
-func captureMode(rc recorderConfig, caps *ffmpegCaps, spec captureSpec) string {
-	if rc.CaptureMethod != "gdigrab" && rc.CaptureMethod != "ddagrab" &&
-		caps.HasGfxCapture && spec.WindowHandle != 0 {
-		return "gfxcapture"
-	}
-	if wantDDA(rc, caps, spec) {
-		return "ddagrab"
-	}
-	return "gdigrab"
-}
-
-// captureIsWindowNative answers the recorder's question: may recording continue
-// while Siege is behind another window?
-//
-// It deliberately does NOT read the running session: it is consulted before
-// capture starts as well as during, and a session that has not begun yet must
-// not be treated as "unsafe to keep filming" or the recorder would never start
-// while the player is alt-tabbed.
-//
-// It reads captureCaps, the WARMED answer, and never probeFFmpeg. That is not a
-// style choice. This is called from the recorder's own loop on every tick, and
-// probeFFmpeg on a cold cache launches ffmpeg seven times while holding a mutex
-// - the same shape as the bug written up above the warmed cache, which jammed
-// the app window on "Connecting..." forever. Until the warm-up finishes this
-// answers false, which is the safe direction: pause on alt-tab, as before.
-func captureIsWindowNative(rc recorderConfig) bool {
-	if rc.CaptureMethod == "gdigrab" || rc.CaptureMethod == "ddagrab" {
-		return false
-	}
-	caps, _, done := captureCaps()
-	if !done || caps == nil {
-		return false
-	}
-	return caps.HasGfxCapture && siegeWindowHandle() != 0
 }
 
 // wantDDA decides whether to use the fast GPU path, honouring an explicit
@@ -958,8 +778,8 @@ func (b ffmpegBackend) Start(spec captureSpec, rc recorderConfig) (captureSessio
 		return nil, fmt.Errorf("cannot create buffer folder: %v", err)
 	}
 
-	mode := captureMode(rc, caps, spec)
-	if mode == "gdigrab" && spec.WindowTitle == "" {
+	useDDA := wantDDA(rc, caps, spec)
+	if !useDDA && spec.WindowTitle == "" {
 		return nil, fmt.Errorf("cannot capture: no GPU screen grab available and no window to fall back to")
 	}
 
@@ -976,7 +796,7 @@ func (b ffmpegBackend) Start(spec captureSpec, rc recorderConfig) (captureSessio
 		}
 	}
 
-	args := buildArgs(spec, rc, caps, mode, loop)
+	args := buildArgs(spec, rc, caps, useDDA, loop)
 	cmd := exec.Command(path, args...)
 	hideConsole(cmd)
 
@@ -989,7 +809,10 @@ func (b ffmpegBackend) Start(spec captureSpec, rc recorderConfig) (captureSessio
 		return nil, err
 	}
 
-	label := "ffmpeg/" + mode
+	label := "ffmpeg/gdigrab"
+	if useDDA {
+		label = "ffmpeg/ddagrab"
+	}
 	encName, _ := encoderArgs(caps, rc)
 
 	s := &ffmpegSession{

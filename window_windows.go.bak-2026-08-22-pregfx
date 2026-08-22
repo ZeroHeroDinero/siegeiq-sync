@@ -209,17 +209,6 @@ func siegeWindow() (hwnd syscall.Handle, ok bool) {
 
 // windowTitle reads a window's caption. Used by the gdigrab fallback path, which
 // captures by title rather than by rectangle.
-// siegeWindowHandle is siegeWindow for callers that want the number and do not
-// want to deal with the not-found case twice. Zero means Siege has no window,
-// and every caller must read that as "capture the display instead".
-func siegeWindowHandle() uintptr {
-	hwnd, ok := siegeWindow()
-	if !ok {
-		return 0
-	}
-	return uintptr(hwnd)
-}
-
 func windowTitle(hwnd syscall.Handle) string {
 	buf := make([]uint16, 512)
 	n, _, _ := procGetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))

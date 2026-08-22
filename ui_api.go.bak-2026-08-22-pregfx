@@ -138,11 +138,6 @@ type uiStatus struct {
 	Encoder        string `json:"encoder"`
 	HasDdagrab     bool   `json:"has_ddagrab"`
 
-	// HasGfxCapture is the one that changes what a player can DO: on this path
-	// recording carries on while Siege is behind another window, so the window
-	// says so rather than leaving them to discover it.
-	HasGfxCapture bool `json:"has_gfxcapture"`
-
 	// GaveUp is set once the recorder has stopped retrying a capture that keeps
 	// failing. Surfacing it is the whole point: the first version said
 	// "Recording" while producing nothing at all, which is the worst possible
@@ -238,8 +233,6 @@ func apiStatus() uiStatus {
 		s.CaptureLive = "ddagrab"
 	case "ffmpeg/gdigrab":
 		s.CaptureLive = "gdigrab"
-	case "ffmpeg/gfxcapture":
-		s.CaptureLive = "gfxcapture"
 	}
 
 	// "Recording" used to mean "the ffmpeg process is alive", which is not the
@@ -299,9 +292,8 @@ func apiStatus() uiStatus {
 		s.CaptureReady = true
 		s.FFmpegVersion = caps.Version
 		s.HasDdagrab = caps.HasDdagrab
-		s.HasGfxCapture = caps.HasGfxCapture
 		s.Encoder, _ = encoderArgs(caps, rc)
-		if !caps.HasDdagrab && !caps.HasGfxCapture {
+		if !caps.HasDdagrab {
 			s.CaptureProblem = "this ffmpeg build has no GPU screen grab - falling back to slower window capture"
 		}
 	}

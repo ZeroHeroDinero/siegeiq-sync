@@ -1109,8 +1109,7 @@ function howCapturing(){
   // when nothing is capturing, because a card that reports the setting over a
   // live session will happily say "GPU screen grab" above a black recording.
   var m=S.capture_live||S.capture_method;
-  var how=(m==="gfxcapture") ? "game window capture, keeps recording when you tab out"
-        : (m==="gdigrab") ? "window capture" : "GPU screen grab";
+  var how=(m==="gdigrab") ? "window capture" : "GPU screen grab";
   var pending=(S.capture_live&&S.capture_method&&S.capture_live!==S.capture_method)
       ? " (restarting to switch)" : "";
   var chip=(S.adapter!=null&&S.adapter>=0) ? (", graphics chip "+S.adapter) : "";
@@ -1168,8 +1167,7 @@ function paintAbout(){
   if(!el||!S.app_version) return;
   el.innerHTML=
      ab("Version",S.app_version)
-    +ab("Capture",(function(m){return m==="gfxcapture"?"game window capture"
-        :m==="gdigrab"?"window capture":"GPU screen grab";})(S.capture_live||S.capture_method)
+    +ab("Capture",((S.capture_live||S.capture_method)==="gdigrab"?"window capture":"GPU screen grab")
         +(S.encoder?(", "+S.encoder):""))
     +ab("Sound",S.audio_on?"being recorded":"not being recorded")
     +ab("Clips folder",S.clip_dir||"not set")
