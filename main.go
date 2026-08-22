@@ -75,8 +75,8 @@ func onReady() {
 	prefSound, prefToast := notifyPrefs()
 	setNotifySound(prefSound)
 	setNotifyToast(prefToast)
-	mSound := systray.AddMenuItemCheckbox("Play a sound on upload",
-		"A short chime when a match uploads, a sharper one if it fails", prefSound)
+	mSound := systray.AddMenuItemCheckbox("Play a sound when a clip is saved",
+		"One short chime, and only when footage was actually saved. Nothing else makes a sound", prefSound)
 	mToast := systray.AddMenuItemCheckbox("Show a notification on upload",
 		"A tray balloon when a match uploads. Never steals focus from the game", prefToast)
 	// Settings sharing. Two switches, both off until asked, plus a way to see

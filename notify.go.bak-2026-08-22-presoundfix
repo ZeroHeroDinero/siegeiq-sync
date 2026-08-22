@@ -339,6 +339,7 @@ func balloon(title, text string, ok bool) {
 // said they do not want anything drawn on their game, this does not overrule that, and
 // the balloon still fires for whenever they tab out.
 func notifyUploadOK(match string) {
+	beep(true)
 	balloon("Match uploaded", "SiegeIQ has your replay for "+match+". Nothing else to do.", true)
 	overlayShow("Match uploaded. SiegeIQ has your replay.")
 }
@@ -346,6 +347,7 @@ func notifyUploadOK(match string) {
 // notifyUploadFailed is the one that actually matters. A silent failure is how somebody
 // finds out at check-in that the replay they are being asked for was never sent.
 func notifyUploadFailed(match string, reason string) {
+	beep(false)
 	msg := "SiegeIQ did not get the replay for " + match + "."
 	if reason != "" {
 		msg += " " + reason
@@ -366,6 +368,7 @@ func notifyUnlinked() {
 	if !atomic.CompareAndSwapInt32(&unlinkedWarned, 0, 1) {
 		return
 	}
+	beep(false)
 	balloon("SiegeIQ Sync needs re-linking",
 		"This device is no longer linked, so your matches have stopped uploading. "+
 			"Open siegeiq.gg and pair Sync again.", false)
@@ -375,12 +378,14 @@ func notifyUnlinked() {
 // itself is silent by design, so this is the only thing that tells the player it
 // happened - which matters when the update is what fixed their problem.
 func notifyUpdated(v string) {
+	beep(true)
 	balloon("SiegeIQ Sync updated",
 		"Now running v"+v+". Nothing to do, syncing carries on as normal.", true)
 }
 
 // notifyPaired is the one-off on a successful first link.
 func notifyPaired() {
+	beep(true)
 	balloon("SiegeIQ Sync is linked",
 		"Your matches will upload on their own from now on. You can close this.", true)
 }

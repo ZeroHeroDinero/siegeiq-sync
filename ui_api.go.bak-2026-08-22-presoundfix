@@ -332,6 +332,9 @@ func apiArm(on string) string {
 	defer traceBridge("arm")()
 	want := on == "on" || on == "true" || on == "1"
 	rec.setArmed(want)
+	if want {
+		beepClip(true)
+	}
 	return ""
 }
 
@@ -412,6 +415,7 @@ func apiSaveSharePrefs(raw string) string {
 	setSettingsPerfOn(in.PerfOn)
 	saveSettingsSharePrefs(in.MouseDPI)
 	logf("settings sharing: aim=%v perf=%v dpi=%d (from the app window)", in.AimOn, in.PerfOn, in.MouseDPI)
+	beepClip(true)
 	return ""
 }
 
@@ -430,7 +434,9 @@ func apiOpenSettingsFile(string) string {
 func apiSaveSettings(raw string) string {
 	var incoming recorderConfig
 	if err := json.Unmarshal([]byte(raw), &incoming); err != nil {
-		// Silent since 2026-08-22. The window is open and already says it failed.
+		// The failure sound too, not just the message. Somebody who clicked Save
+		// and looked away should not be told it worked by silence.
+		beep(false)
 		return "could not read those settings: " + err.Error()
 	}
 	incoming.normalise()
@@ -460,8 +466,11 @@ func apiSaveSettings(raw string) string {
 		clearBuffer(incoming.bufferDir())
 	}
 
-	// Silent since 2026-08-22. Saving a setting is the app doing as it was told,
-	// and the player is looking at the window when it happens.
+	// The quieter of the two sounds. Saving a setting is the app doing as it was
+	// told, not an event worth interrupting anyone for, and it follows the same
+	// notification switch as everything else - somebody who turned sounds off in
+	// the tray still gets silence here.
+	beepClip(true)
 	return ""
 }
 

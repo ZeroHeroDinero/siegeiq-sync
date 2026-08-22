@@ -24,10 +24,10 @@ func notifyClipsSaved(n int, dir string) {
 		true)
 }
 
-// notifyClipFailed reports a cut that did not work. Silent since 2026-08-22:
-// a saved clip is the only thing that makes a noise, so a beep can only ever mean
-// one thing. A failure shows the message and nothing else.
+// notifyClipFailed reports a cut that did not work. Separate from the success
+// path so the sound alone tells a player which one happened.
 func notifyClipFailed(reason string) {
+	beepClip(false)
 	balloon("Couldn't save a clip",
 		"The recording was running but the clip could not be cut. "+reason+
 			" Open the log from the tray if this keeps happening.",
