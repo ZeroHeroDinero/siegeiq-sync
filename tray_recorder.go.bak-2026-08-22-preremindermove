@@ -87,27 +87,18 @@ func buildRecorderMenu() *recorderMenu {
 		m.ruleItems[opt.key] = it
 	}
 
+	// The overlay switch lives here as well as in Settings. Putting it ONLY in
+	// Settings was a mistake: the thing it controls appears over the game, so the
+	// place you reach for it is the tray, not a window you have to go and open.
+	m.overlay = m.root.AddSubMenuItemCheckbox("In-game reminder",
+		"Show your current focus over the game for six seconds between rounds", rc.OverlayOn)
+
+	m.showOverlay = m.root.AddSubMenuItem("Show the reminder now",
+		"Draw it immediately, so you can see where it appears without playing a round")
+
 	m.saveLast = m.root.AddSubMenuItem("Save the last 2 minutes",
 		"Write whatever is in the buffer right now to a clip")
 	m.openFolder = m.root.AddSubMenuItem("Open clips folder", "Show your saved clips in Explorer")
-
-	// MOVED OUT OF THE RECORDER MENU, 2026-08-22.
-	//
-	// The reminder is drawn over the game. It does not record anything, it does not
-	// decide what is kept, and switching the recorder off does not switch it off. It
-	// sat under Recorder only because that menu was written first, and a player
-	// looking for "the thing that appears over my game" had no reason to look there.
-	//
-	// It still belongs in the tray rather than only in Settings, for the original
-	// reason: the thing it controls appears over the game, so the place you reach
-	// for it is the tray, not a window you have to go and open. It is one level up
-	// now, as its own group, sitting next to Recorder instead of inside it.
-	reminder := systray.AddMenuItem("In-game reminder",
-		"The focus reminder drawn over your game between rounds")
-	m.overlay = reminder.AddSubMenuItemCheckbox("Show it over my game",
-		"Show your current focus over the game for six seconds between rounds", rc.OverlayOn)
-	m.showOverlay = reminder.AddSubMenuItem("Show it now",
-		"Draw it immediately, so you can see where it appears without playing a round")
 
 	return m
 }
