@@ -12,13 +12,6 @@
 // It is also why the buffer can be pruned safely. Deleting the oldest footage is
 // deleting whole files, so there is no container to rewrite and no risk of
 // corrupting the segment ffmpeg is still writing into.
-//
-// The filename is only accurate to the second, because that is all a filename
-// can carry. segindex.go stamps the same segments to a few milliseconds while
-// they are being written, and listSegments below prefers that stamp whenever it
-// exists. The filename remains the fallback and remains the thing that decides
-// whether a file is ours at all, so a missing or nonsense index costs accuracy
-// and nothing else.
 package main
 
 import (
@@ -83,10 +76,6 @@ func listSegments(dir string) ([]segment, error) {
 		return nil, err
 	}
 
-	// Precise starts, when the watcher managed to record them. Read once for the
-	// whole listing rather than per file.
-	precise := readSegIndex(dir)
-
 	var segs []segment
 	for _, e := range entries {
 		if e.IsDir() {
@@ -95,9 +84,6 @@ func listSegments(dir string) ([]segment, error) {
 		start, ok := segmentTime(e.Name())
 		if !ok {
 			continue
-		}
-		if p, ok := precise[e.Name()]; ok {
-			start = p
 		}
 		info, err := e.Info()
 		if err != nil {
@@ -236,7 +222,6 @@ func clearBuffer(dir string) {
 	for _, s := range segs {
 		_ = os.Remove(s.Path)
 	}
-	removeSegIndex(dir)
 }
 
 // ---- small shared helpers -------------------------------------------------

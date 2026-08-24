@@ -92,13 +92,6 @@ type ffmpegCaps struct {
 	HasX264    bool
 	Version    string
 
-	// HasSegmentList is whether this build's segment muxer offers a segment
-	// list, which is what gives segindex.go its microsecond-exact spacing.
-	// Probed rather than assumed: these are the only options this app adds to
-	// the recording command line that it does not otherwise test, and an ffmpeg
-	// handed an option it does not know exits rather than carrying on.
-	HasSegmentList bool
-
 	// Why each hardware encoder was ruled out, in ffmpeg's own words. Kept so
 	// the capture test can say "your graphics card refused this" instead of
 	// inventing a reason.
@@ -408,10 +401,6 @@ func probeFFmpeg(path string) (*ffmpegCaps, error) {
 		c.HasDdagrab = strings.Contains(out, "ddagrab")
 	}
 	probeGfxCapture(path, c)
-	if out, err := runFFmpegText(path, "-hide_banner", "-h", "muxer=segment"); err == nil {
-		c.HasSegmentList = strings.Contains(out, "segment_list_flags") &&
-			strings.Contains(out, "segment_list_type")
-	}
 	if out, err := runFFmpegText(path, "-hide_banner", "-encoders"); err == nil {
 		c.HasX264 = strings.Contains(out, "libx264")
 
@@ -823,28 +812,8 @@ func buildArgs(spec captureSpec, rc recorderConfig, caps *ffmpegCaps, mode strin
 		"-segment_format", "mp4",
 		"-reset_timestamps", "1",
 		"-strftime", "1",
+		filepath.Join(spec.SegmentDir, segmentPattern),
 	)
-
-	// The segment list is how a clip stops being a second out. It records each
-	// segment's exact place on the capture timeline, which segindex.go anchors
-	// to the wall clock. It writes a small text file beside the footage and
-	// changes nothing about the video itself.
-	//
-	// Added only when the probe SAW this build offer it. Everything else on this
-	// command line has been tested on this machine one way or another, and this
-	// is not the command line to start guessing on: an ffmpeg that rejects an
-	// option does not record badly, it does not record. Without the list,
-	// segindex.go falls back to its own stamps, which are still far closer than
-	// the filename ever was.
-	if caps.HasSegmentList {
-		args = append(args,
-			"-segment_list", filepath.Join(spec.SegmentDir, segListName),
-			"-segment_list_type", "csv",
-			"-segment_list_flags", "+live",
-		)
-	}
-
-	args = append(args, filepath.Join(spec.SegmentDir, segmentPattern))
 	return args
 }
 
@@ -922,11 +891,6 @@ type ffmpegSession struct {
 	// loop is the WASAPI capture feeding this session's audio pipe, if there is
 	// one. Owned here so it dies with the recording rather than outliving it.
 	loop *loopbackCapture
-
-	// idx watches the segment folder and records when each segment really
-	// started. Owned here for the same reason as loop: it must not outlive the
-	// capture it is describing.
-	idx *segIndex
 }
 
 func (s *ffmpegSession) Backend() string { return s.label }
@@ -1038,14 +1002,7 @@ func (b ffmpegBackend) Start(spec captureSpec, rc recorderConfig) (captureSessio
 
 	s.loop = loop
 
-	// The segment watcher starts BEFORE ffmpeg, so every file already sitting in
-	// the buffer folder is recognised as an earlier session's before ffmpeg has
-	// a chance to create one of its own. Getting this order wrong would stamp
-	// old footage with the current time, which is worse than not stamping it.
-	s.idx = startSegIndex(spec.SegmentDir)
-
 	if err := cmd.Start(); err != nil {
-		s.idx.Stop()
 		loop.Stop()
 		return nil, fmt.Errorf("could not start ffmpeg: %v", err)
 	}
@@ -1081,10 +1038,6 @@ func (b ffmpegBackend) Start(spec captureSpec, rc recorderConfig) (captureSessio
 
 	go func() {
 		err := cmd.Wait()
-		// Stopped here rather than in Stop(), because a recording can also end by
-		// crashing or being killed, and the newest segment - the one most likely
-		// to be wanted - deserves a precise time down every one of those paths.
-		s.idx.Stop()
 		s.mu.Lock()
 		s.running = false
 		if err != nil && !s.stopped {
