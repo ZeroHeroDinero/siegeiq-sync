@@ -290,8 +290,6 @@ type uiPrefs struct {
 	Theme   string `json:"theme"`
 	Font    string `json:"font"`
 	Density string `json:"density"`
-	// ClipView is how the clip list is drawn. See paintClips in ui_html.go.
-	ClipView string `json:"clipview"`
 }
 
 func oneOf(v string, allowed ...string) bool {
@@ -320,13 +318,9 @@ func apiSaveUIPrefs(raw string) string {
 	if !oneOf(p.Density, "compact", "cosy") {
 		p.Density = "compact"
 	}
-	if !oneOf(p.ClipView, "list", "grid", "small", "medium", "large") {
-		p.ClipView = "list"
-	}
 	var c config
 	loadJSON(configPath(), &c)
 	c.UITheme, c.UIFont, c.UIDensity = p.Theme, p.Font, p.Density
-	c.UIClipView = p.ClipView
 	saveJSON(configPath(), &c)
 	b, _ := json.Marshal(trimReply{OK: true})
 	return string(b)

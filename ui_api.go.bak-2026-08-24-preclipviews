@@ -172,7 +172,6 @@ type uiStatus struct {
 	UITheme   string `json:"ui_theme,omitempty"`
 	UIFont    string `json:"ui_font,omitempty"`
 	UIDensity string `json:"ui_density,omitempty"`
-	UIClipView string `json:"ui_clip_view,omitempty"`
 
 	AudioOn     bool   `json:"audio_on"`
 	AudioDevice string `json:"audio_device"`
@@ -233,7 +232,6 @@ func apiStatus() uiStatus {
 	loadJSON(configPath(), &cfg)
 	s.Linked = cfg.DeviceToken != ""
 	s.UITheme, s.UIFont, s.UIDensity = cfg.UITheme, cfg.UIFont, cfg.UIDensity
-	s.UIClipView = cfg.UIClipView
 
 	traceStep("checking capture trouble")
 	s.GaveUp, s.CaptureError = rec.captureTrouble()

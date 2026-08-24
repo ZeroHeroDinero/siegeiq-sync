@@ -44,10 +44,6 @@ func ensureThumb(rc recorderConfig, clipPath string) string {
 		return out
 	}
 
-	// 720 wide rather than 360: the clip list can now be shown as large tiles,
-	// and a 360px still stretched across one of those is visibly soft. Old
-	// thumbnails are left alone - they are cached beside the clip and are only
-	// remade if deleted.
 	// One second in, rather than frame zero. The first frame of a trimmed clip
 	// is often the tail of a loading screen or a fade, which makes every
 	// thumbnail look identical and useless.
@@ -56,7 +52,7 @@ func ensureThumb(rc recorderConfig, clipPath string) string {
 		"-ss", "1",
 		"-i", clipPath,
 		"-frames:v", "1",
-		"-vf", "scale=720:-2",
+		"-vf", "scale=360:-2",
 		"-q:v", "5",
 		out,
 	)
@@ -65,7 +61,7 @@ func ensureThumb(rc recorderConfig, clipPath string) string {
 		// A clip shorter than a second lands here. Try frame zero before giving up.
 		cmd = exec.Command(ff,
 			"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-			"-i", clipPath, "-frames:v", "1", "-vf", "scale=720:-2", "-q:v", "5", out)
+			"-i", clipPath, "-frames:v", "1", "-vf", "scale=360:-2", "-q:v", "5", out)
 		hideConsole(cmd)
 		if err := cmd.Run(); err != nil {
 			return ""
