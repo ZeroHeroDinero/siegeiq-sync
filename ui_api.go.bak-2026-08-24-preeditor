@@ -167,12 +167,6 @@ type uiStatus struct {
 	// other control next to it.
 	ClipUploadLive bool `json:"clip_upload_live"`
 
-	// The window reads these once, on the first status, and applies them as
-	// attributes on the root element. Absent means the default look.
-	UITheme   string `json:"ui_theme,omitempty"`
-	UIFont    string `json:"ui_font,omitempty"`
-	UIDensity string `json:"ui_density,omitempty"`
-
 	AudioOn     bool   `json:"audio_on"`
 	AudioDevice string `json:"audio_device"`
 	AudioNote   string `json:"audio_note"`
@@ -231,7 +225,6 @@ func apiStatus() uiStatus {
 	var cfg config
 	loadJSON(configPath(), &cfg)
 	s.Linked = cfg.DeviceToken != ""
-	s.UITheme, s.UIFont, s.UIDensity = cfg.UITheme, cfg.UIFont, cfg.UIDensity
 
 	traceStep("checking capture trouble")
 	s.GaveUp, s.CaptureError = rec.captureTrouble()

@@ -630,10 +630,6 @@ var RULES=[
  ["my_deaths","Only rounds I died in","Every round you were killed in, drone phase trimmed off.","needs syncing on"],
  ["my_kills","Only rounds I got a kill","Every round you got at least one kill, drone phase trimmed off.","needs syncing on"],
  ["clutches","Only my clutch rounds","Rounds you won as the last player alive.","needs syncing on"],
- // Added 2026-08-24. The first rule that cuts to a MOMENT rather than to a round.
- // It needs the kill times the upload reply now carries; a round the backend could
- // not place a kill on the clock keeps its action phase and says so on the clip.
- ["kill_moments","Just the moment of each kill","A few seconds either side of every kill, instead of the whole round.","needs syncing on"],
  ["nothing","Nothing automatically","Buffer only. You save moments by hand.",""]
 ];
 
@@ -1725,8 +1721,6 @@ function paintFields(){
    +num("clip_disk_mb","Clips limit (MB)",settings.clip_disk_mb,"Oldest clips are removed once this is passed.")
    +num("clip_keep_days","Keep clips for (days)",settings.clip_keep_days,"Clips older than this are removed.")
    +num("last_seconds","Last seconds per round",settings.last_seconds,"Used by the last-seconds keep rule.")
-   +num("kill_lead_sec","Before each kill (seconds)",settings.kill_lead_sec,"Used by the kill-moment rule. A Siege kill is decided by the couple of seconds before it.")
-   +num("kill_trail_sec","After each kill (seconds)",settings.kill_trail_sec,"Used by the kill-moment rule. Enough to see the outcome.")
    +num("pre_pad_sec","Extra before (seconds)",settings.pre_pad_sec,"Padding at the front, to absorb boundary error.")
    +num("post_pad_sec","Extra after (seconds)",settings.post_pad_sec,"Padding at the end of each clip.")
    +selLabelled("send_to_ai","Send clips to AI Analyze",settings.send_to_ai,

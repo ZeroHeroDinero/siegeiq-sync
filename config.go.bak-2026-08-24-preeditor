@@ -17,7 +17,7 @@ import (
 // backend is the SiegeIQ API root. version is the running build - keep it in
 // lockstep with winres/winres.json and the installer's AppVersion.
 const backend = "https://siegeiq-backend-production.up.railway.app"
-const version = "1.6.0"
+const version = "1.5.9"
 
 const (
 	scanEvery = 20 * time.Second // how often the watch loop rescans the replay folder
@@ -91,14 +91,6 @@ type config struct {
 	// installer sees the app rather than hunting for a tray icon they were not
 	// told about. Afterwards it stays out of the way and opens only on request.
 	WindowShown bool `json:"window_shown,omitempty"`
-
-	// Window appearance. Stored here rather than in the page because the page
-	// is rewritten to disk on every launch, so anything it kept locally would
-	// not survive an update. Empty means the shipped default, which keeps an
-	// existing install looking exactly as it did. See clipedit.go.
-	UITheme   string `json:"ui_theme,omitempty"`
-	UIFont    string `json:"ui_font,omitempty"`
-	UIDensity string `json:"ui_density,omitempty"`
 }
 
 // ClipFileOrEmpty is a small helper so callers can compare against the stored

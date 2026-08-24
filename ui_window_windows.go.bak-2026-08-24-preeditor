@@ -388,10 +388,6 @@ func bindUI(w webview2.WebView) {
 	bind("goPlayClip", func(path string) string { return apiPlayClip(path) })
 	bind("goDeleteClip", func(path string) string { return apiDeleteClip(path) })
 	bind("goSendClip", func(path string) string { return apiSendClip(path) })
-	// The clip editor. One call: everything else it does happens in the page,
-	// because the window is loaded from file:// and can open a clip directly.
-	bind("goTrimClip", func(raw string) string { return apiTrimClip(raw) })
-	bind("goSaveUIPrefs", func(raw string) string { return apiSaveUIPrefs(raw) })
 	bind("goSaveLast", func(mins string) string { return apiSaveLast(mins) })
 	bind("goOpenFolder", func(string) string { return apiOpenClipFolder() })
 	bind("goOpenLog", func(string) string { return apiOpenLog() })

@@ -42,7 +42,6 @@ const (
 	KeepMyDeaths    = "my_deaths"    // needs events: rounds where the uploader died
 	KeepMyKills     = "my_kills"     // needs events: rounds where the uploader got a kill
 	KeepClutches    = "clutches"     // needs events: rounds the uploader ended as last alive
-	KeepKillMoments = "kill_moments" // needs events: a window around each of your kills
 	KeepLastSeconds = "last_seconds" // the final N seconds of each round
 	KeepNothing     = "nothing"      // buffer only; the player saves moments by hand
 )
@@ -63,12 +62,6 @@ type recorderConfig struct {
 
 	// Trim shaping, in seconds.
 	LastSeconds int `json:"last_seconds"` // for KeepLastSeconds
-
-	// The window around a kill, for KeepKillMoments. Separate from PrePadSec and
-	// PostPadSec on purpose: those absorb keyframe snap on a round-sized span, and
-	// a five second moment wants its own, much tighter, shape.
-	KillLeadSec  int `json:"kill_lead_sec"`  // footage kept before each kill
-	KillTrailSec int `json:"kill_trail_sec"` // footage kept after each kill
 	PrePadSec   int `json:"pre_pad_sec"`  // extra footage kept before a span
 	PostPadSec  int `json:"post_pad_sec"` // extra footage kept after a span
 
@@ -189,12 +182,6 @@ func defaultRecorderConfig() recorderConfig {
 		PrePadSec:   6,
 		PostPadSec:  4,
 
-		// Eight seconds before and four after. A Siege kill is decided by what the
-		// player did in the couple of seconds before it, so the lead is the half
-		// that matters and the trail only needs to show the outcome.
-		KillLeadSec:  8,
-		KillTrailSec: 4,
-
 		FPS:       60,
 		HeightCap: 1440,
 		Encoder:   "auto",
@@ -268,7 +255,7 @@ func (rc *recorderConfig) normalise() {
 
 	switch rc.KeepRule {
 	case KeepWholeMatch, KeepActionOnly, KeepMyDeaths, KeepMyKills,
-		KeepClutches, KeepKillMoments, KeepLastSeconds, KeepNothing:
+		KeepClutches, KeepLastSeconds, KeepNothing:
 	default:
 		rc.KeepRule = d.KeepRule
 	}
@@ -290,12 +277,6 @@ func (rc *recorderConfig) normalise() {
 	}
 	if rc.LastSeconds <= 0 {
 		rc.LastSeconds = d.LastSeconds
-	}
-	if rc.KillLeadSec <= 0 {
-		rc.KillLeadSec = d.KillLeadSec
-	}
-	if rc.KillTrailSec <= 0 {
-		rc.KillTrailSec = d.KillTrailSec
 	}
 	if rc.PrePadSec < 0 {
 		rc.PrePadSec = d.PrePadSec
@@ -348,7 +329,7 @@ func (rc *recorderConfig) normalise() {
 // to explain a degrade honestly in the log.
 func (rc recorderConfig) needsEvents() bool {
 	switch rc.KeepRule {
-	case KeepMyDeaths, KeepMyKills, KeepClutches, KeepKillMoments:
+	case KeepMyDeaths, KeepMyKills, KeepClutches:
 		return true
 	}
 	return false

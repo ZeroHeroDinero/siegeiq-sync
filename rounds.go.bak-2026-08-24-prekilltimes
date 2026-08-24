@@ -65,11 +65,6 @@ type roundEvent struct {
 	UploaderDied   bool   `json:"uploader_died"`
 	UploaderKills  int    `json:"uploader_kills"`
 	UploaderClutch bool   `json:"uploader_clutch"`
-	// Seconds before this round ended, one per kill the uploader got, newest last.
-	// ABSENT rather than empty whenever the backend could not place a kill on the
-	// round clock without guessing, which is why the rule below degrades on an
-	// empty slice instead of quietly keeping nothing.
-	KillTimes []float64 `json:"kill_times_before_end_sec,omitempty"`
 	// Exact boundaries, seconds relative to the round's end. Zero means unknown.
 	StartBeforeEndSec  float64 `json:"start_before_end_sec"`
 	ActionBeforeEndSec float64 `json:"action_before_end_sec"`

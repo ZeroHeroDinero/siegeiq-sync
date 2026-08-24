@@ -57,304 +57,251 @@ const uiHTMLTemplate = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SiegeIQ Sync</title>
 <style>
-/* SiegeIQ Sync interface, compact edition. 2026-08-24.
-
-   Every class name here already existed. The markup and the script were not
-   rebuilt around a new vocabulary, the vocabulary was restyled, which is why a
-   redesign this size does not need the 1300 lines of wiring below to change.
-
-   THEMES AND TYPEFACES. Everything visual is a token on :root. A theme
-   redefines about a dozen colours and nothing else, and a typeface redefines two
-   font stacks. All three faces ship with Windows, so nothing is downloaded and
-   the promise that this app fetches nothing from the internet still holds. */
 :root{
-  --bg:#070E17; --bg2:#0A1420; --panel:#0D1926; --panel2:#111F30; --panel3:#16283A;
-  --line:#17293C; --line2:#22405A;
-  --text:#E8F2F8; --dim:#93A9BC; --faint:#5F7488;
-  --accent:#2FC3E8; --accent2:#1B93B4; --onAccent:#04141B; --accentGlow:#2FC3E82E;
+  --bg:#080F18; --bg2:#0B1522;
+  --panel:#0E1B29; --panel2:#132538; --panel3:#18304612;
+  --line:#1B2F44; --line2:#26445F;
+  --text:#EAF3F9; --dim:#8FA8BC; --faint:#5E7488;
+  --accent:#2FC3E8; --accent2:#1B93B4; --accentGlow:#2FC3E82E;
   --good:#4FD199; --warn:#F0B45C; --bad:#F0705C;
-  --r:8px; --r2:6px;
-  --fh:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
-  --fb:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
-  --pad:12px; --row:30px; --fs:12.5px;
+  --r:12px;
 }
-:root[data-theme="slate"]{
-  --bg:#0B0E12; --bg2:#10141A; --panel:#141922; --panel2:#1A2028; --panel3:#222A34;
-  --line:#232A34; --line2:#333C48;
-  --text:#E6EAF0; --dim:#9AA5B4; --faint:#6B7688;
-  --accent:#8FA6C4; --accent2:#6C82A0; --onAccent:#0B0E12; --accentGlow:#8FA6C42E;
-}
-:root[data-theme="amber"]{
-  --bg:#100C06; --bg2:#17110A; --panel:#1C150C; --panel2:#241C11; --panel3:#2E2416;
-  --line:#2E2416; --line2:#453620;
-  --text:#F6EEE0; --dim:#BCA88A; --faint:#8A7A5F;
-  --accent:#E8A94B; --accent2:#B8832F; --onAccent:#1A1206; --accentGlow:#E8A94B2E;
-}
-:root[data-theme="violet"]{
-  --bg:#0C0916; --bg2:#120E1F; --panel:#171128; --panel2:#1E1733; --panel3:#271E42;
-  --line:#271E42; --line2:#3B2E60;
-  --text:#EDE8FA; --dim:#A99BC6; --faint:#7A6D94;
-  --accent:#A47CF3; --accent2:#7D57C9; --onAccent:#0C0916; --accentGlow:#A47CF32E;
-}
-:root[data-font="condensed"]{
-  --fh:"Bahnschrift","Arial Narrow","Liberation Sans Narrow","Segoe UI",sans-serif;
-  --fb:"Bahnschrift","Arial Narrow","Liberation Sans Narrow","Segoe UI",sans-serif;
-}
-:root[data-font="mono"]{
-  --fh:"Cascadia Mono",Consolas,"DejaVu Sans Mono",ui-monospace,monospace;
-  --fb:"Cascadia Mono",Consolas,"DejaVu Sans Mono",ui-monospace,monospace; --fs:12px;
-}
-:root[data-density="cosy"]{ --pad:17px; --row:36px; --fs:13.5px; }
-
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{background:var(--bg);color:var(--text);font-family:var(--fb);font-size:var(--fs);
-  line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
-::-webkit-scrollbar{width:9px;height:9px}
+body{
+  background:
+    radial-gradient(1100px 520px at 12% -12%, #12314733 0%, transparent 62%),
+    radial-gradient(900px 460px at 108% 4%, #2FC3E814 0%, transparent 58%),
+    var(--bg);
+  color:var(--text);
+  font:14px/1.6 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  padding:26px 30px 60px; -webkit-font-smoothing:antialiased;
+}
+::-webkit-scrollbar{width:11px;height:11px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--line2);border-radius:9px;border:3px solid var(--bg)}
-::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+::-webkit-scrollbar-thumb{background:#1E3549;border-radius:8px;border:3px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:#2B4A66;background-clip:padding-box;border:3px solid transparent}
 
-@keyframes riseIn{to{opacity:1;transform:none}}
-.rise{opacity:0;transform:translateY(7px);animation:riseIn .34s ease forwards}
-.d1{animation-delay:.03s}.d2{animation-delay:.07s}.d3{animation-delay:.11s}.d4{animation-delay:.15s}
+@keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--accentGlow)}50%{box-shadow:0 0 0 7px transparent}}
+@keyframes shimmer{0%{background-position:-380px 0}100%{background-position:380px 0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.rise{animation:rise .42s cubic-bezier(.22,.7,.3,1) both}
+.d1{animation-delay:.04s}.d2{animation-delay:.09s}.d3{animation-delay:.14s}.d4{animation-delay:.19s}
 
-/* ── shell ─────────────────────────────────────────────────────────────── */
-.shell{display:flex;height:100%}
-.side{width:184px;flex:0 0 184px;background:var(--bg2);border-right:1px solid var(--line);
-  display:flex;flex-direction:column;padding:10px 8px}
-.brand{display:flex;align-items:center;gap:8px;padding:3px 6px 11px}
-.logo{width:24px;height:24px;border-radius:6px;flex-shrink:0;display:grid;place-items:center;
-  background:linear-gradient(150deg,var(--accent),var(--accent2))}
-.logo svg{width:15px;height:15px;fill:var(--onAccent)}
-h1,.brand h1{font-family:var(--fh);font-size:13px;font-weight:700;line-height:1.1;letter-spacing:.01em}
-.sub,.brand .sub{font-size:10px;color:var(--faint);line-height:1.25}
-.nav{display:flex;flex-direction:column;gap:1px;margin-top:2px}
-.nav a{display:flex;align-items:center;gap:8px;height:var(--row);padding:0 8px;border-radius:var(--r2);
-  color:var(--dim);cursor:pointer;border:1px solid transparent;font-family:var(--fh);
-  font-size:var(--fs);user-select:none;text-decoration:none}
-.nav a:hover{background:var(--panel);color:var(--text)}
-.nav a.on{background:var(--panel2);color:var(--text);border-color:var(--line2)}
-.nav a.on .ic{fill:var(--accent)}
-.nav .ic{width:14px;height:14px;fill:var(--faint);flex-shrink:0}
-.nav .n{margin-left:auto;font-size:10px;color:var(--faint);background:var(--panel);
-  border:1px solid var(--line);border-radius:99px;padding:0 6px;line-height:15px}
-.nav a.on .n{color:var(--accent);border-color:var(--line2)}
-.sidefoot{margin-top:auto;border-top:1px solid var(--line);padding-top:8px;
-  display:flex;flex-direction:column;gap:6px}
-.sidefoot .state{padding:0 6px}
-button.wide{width:100%}
+header{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(140deg,var(--accent),var(--accent2));
+      display:flex;align-items:center;justify-content:center;flex:none}
+.logo svg{width:19px;height:19px;fill:#04121B}
+h1{font-size:19px;font-weight:600;letter-spacing:-.2px;line-height:1.15}
+.sub{color:var(--faint);font-size:12px;letter-spacing:.2px}
+.state{margin-left:auto;display:flex;align-items:center;gap:9px;background:#0E1B29CC;border:1px solid var(--line);
+       border-radius:22px;padding:8px 16px 8px 13px;font-size:13px;backdrop-filter:blur(8px);
+       transition:border-color .3s,background .3s;max-width:46%}
+.state.live{border-color:#2FC3E866;background:#0F2734CC}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none;transition:background .3s}
+.dot.on{background:var(--good);animation:pulse 2.1s infinite}
+.dot.off{background:var(--bad)}
+.dot.idle{background:var(--warn)}
+#stateline{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-.main{flex:1;min-width:0;overflow-y:auto;padding:var(--pad);display:flex;flex-direction:column}
-.main section{display:block}
-.main section[hidden]{display:none}
-.main section h2:first-child{margin-top:0}
+h2{font-size:11.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:1.1px;
+   margin:30px 0 12px;display:flex;align-items:center;gap:11px}
+h2:after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
 
-/* ── state pill ────────────────────────────────────────────────────────── */
-.state{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim);min-width:0}
-.state.live{color:var(--text)}
-#stateline{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex-shrink:0}
-.dot.on{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 22%,transparent)}
-.dot.off{background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 22%,transparent)}
-.dot.idle{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:12px}
+.card{background:linear-gradient(168deg,#10202FEE,#0C1826EE);border:1px solid var(--line);border-radius:var(--r);
+      padding:15px 17px;transition:transform .22s cubic-bezier(.22,.7,.3,1),border-color .22s}
+.card:hover{transform:translateY(-2px);border-color:var(--line2)}
+.card .k{color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.card .v{font-size:23px;margin-top:7px;font-weight:600;letter-spacing:-.5px;line-height:1.1}
+.card .v.sm{font-size:17px}
+.card .s{color:var(--dim);font-size:12.5px;margin-top:4px;min-height:19px}
+.bar{height:6px;background:#0A1723;border-radius:4px;margin-top:11px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent2),var(--accent));
+       transition:width .7s cubic-bezier(.22,.7,.3,1)}
+.bar i.hot{background:linear-gradient(90deg,#C2803A,var(--warn))}
 
-/* ── headings ──────────────────────────────────────────────────────────── */
-h2{font-family:var(--fh);font-size:11px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
-  color:var(--faint);margin:16px 0 7px;display:flex;align-items:center;gap:8px}
-h2:after{content:"";flex:1;height:1px;background:var(--line)}
+.note{display:flex;gap:11px;align-items:flex-start;background:#0E1B29;border:1px solid var(--line);
+      border-left:3px solid var(--good);border-radius:0 10px 10px 0;padding:12px 15px;margin-top:14px;
+      font-size:13.5px;color:var(--dim);line-height:1.55}
+.note.warn{border-left-color:var(--warn)} .note.bad{border-left-color:var(--bad)}
+.note b{color:var(--text);font-weight:600}
+.note svg{width:16px;height:16px;flex:none;margin-top:2px;opacity:.85}
 
-/* ── the pinned strip ──────────────────────────────────────────────────── */
-.pin{position:sticky;top:calc(var(--pad) * -1);z-index:5;background:var(--bg);
-  padding-bottom:10px;margin-bottom:2px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
-  background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
-.card{background:var(--panel);padding:8px 11px;transition:background .15s}
-.card:hover{background:var(--panel2)}
-.card .k{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);font-family:var(--fh)}
-.card .v{font-family:var(--fh);font-size:16px;font-weight:700;line-height:1.25;margin-top:1px}
-.card .v.sm{font-size:12.5px;font-weight:600}
-.card .s{font-size:10.5px;color:var(--dim);line-height:1.35}
-.bar{height:3px;border-radius:3px;background:var(--line2);margin-top:6px;overflow:hidden}
-.bar i{display:block;height:100%;background:var(--accent)}
-.bar i.hot{background:var(--warn)}
-
-/* ── notices ───────────────────────────────────────────────────────────── */
-.note{display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border-radius:var(--r2);
-  border:1px solid var(--line);border-left:2px solid var(--accent);background:var(--panel);
-  font-size:11.5px;line-height:1.5;margin:8px 0}
-.note.warn{border-left-color:var(--warn)}
-.note.bad{border-left-color:var(--bad)}
-.note b{font-weight:700}
-.note svg{width:13px;height:13px;flex-shrink:0;margin-top:2px;fill:var(--dim)}
-
-/* ── controls ──────────────────────────────────────────────────────────── */
-.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}
-button{font-family:var(--fh);font-size:11.5px;height:26px;padding:0 10px;cursor:pointer;
-  border-radius:var(--r2);border:1px solid var(--line2);background:var(--panel2);color:var(--text);
-  display:inline-flex;align-items:center;gap:6px}
-button:hover{background:var(--line)}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+button{background:#152738;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 16px;
+       font:inherit;font-size:13.5px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+       transition:background .18s,border-color .18s,transform .12s}
+button:hover{background:#1B3145;border-color:var(--line2)}
 button:active{transform:translateY(1px)}
-button svg{width:12px;height:12px;fill:currentColor}
-button.primary{background:var(--accent);border-color:var(--accent);color:var(--onAccent);font-weight:700}
-button.primary:hover{background:var(--accent2);border-color:var(--accent2)}
-button.ghost{background:transparent;border-color:transparent;color:var(--dim)}
-button.ghost:hover{color:var(--text);background:var(--panel2)}
-button.danger:hover{background:var(--bad);border-color:var(--bad);color:#160607}
-button.sm{height:22px;padding:0 8px;font-size:11px}
-
-.savegrp{display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap;
-  background:var(--panel);border:1px solid var(--line);border-radius:var(--r2);padding:4px 7px}
-.savelbl{display:inline-flex;align-items:center;gap:6px;font-family:var(--fh);font-size:11.5px;color:var(--dim)}
-.savelbl svg{width:12px;height:12px;fill:var(--faint)}
-button.qlen{height:22px;padding:0 9px;font-size:11px;background:var(--panel2)}
-.savegrp.dim{opacity:.55}
+button svg{width:15px;height:15px;fill:currentColor;opacity:.9}
+button.primary{background:linear-gradient(140deg,var(--accent),var(--accent2));border-color:transparent;color:#04121B;font-weight:600}
+button.primary:hover{filter:brightness(1.09)}
+button.ghost{background:transparent}
+.savegrp{display:inline-flex;align-items:center;gap:6px;flex:none;background:#0E1B29;border:1px solid var(--line);
+         border-radius:11px;padding:5px 6px 5px 14px}
+.savelbl{display:inline-flex;align-items:center;gap:8px;color:var(--dim);font-size:13.5px;font-weight:500;
+         white-space:nowrap;padding-right:4px}
+.savelbl svg{width:15px;height:15px;fill:currentColor;opacity:.9}
+/* NOT .len - that class is already the duration badge overlaid on a clip
+   thumbnail, and it is position:absolute. Reusing the name parked all five
+   buttons on top of each other in the corner of the screen. */
+button.qlen{padding:7px 12px;font-size:13px;border-radius:8px;flex:none}
+/* Greyed out rather than hidden. A control that vanishes when it cannot be used
+   teaches nobody that it exists; one that is visible and explains itself does. */
+.savegrp.dim{opacity:.45}
 .savegrp.dim button{pointer-events:none}
-.savehint{font-size:10.5px;color:var(--faint);margin-top:6px}
+.savehint{color:var(--dim);font-size:12.5px;line-height:1.5;align-self:center}
+/* Live send progress on a clip card. It has to be visible without being loud:
+   the send now runs in the background, so this is the only thing telling the
+   player anything is happening at all. */
+.sending{margin-top:6px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:6px}
+.sending:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
+  animation:pulse 1.4s infinite;flex:none}
+.sending.ok{color:var(--good)} .sending.ok:before{background:var(--good);animation:none}
+/* Coach avatar. The mouth is scaled by JavaScript from the live audio, so it has
+   to have a fill-box transform origin or it scales about the wrong point and the
+   face comes apart. Same rule the website uses. */
+.coachbox{display:flex;gap:22px;align-items:center;flex-wrap:wrap;background:linear-gradient(168deg,#132738EE,#0F1E2CEE);
+  border:1px solid var(--line);border-radius:var(--r);padding:18px 20px}
+/* The stage. Matches the website: a pool of light in the CURRENT coach own colour
+   rather than a flat near-black panel, with --coach-tint set by applyCoachLook().
+   The fallback is Cipher blue, so a coach with no tint looks like it always did. */
+.coachart{flex:none;width:150px;padding:10px 10px 4px;border-radius:10px;
+  background:radial-gradient(ellipse 64% 46% at 50% 76%, rgba(var(--coach-tint,24,174,209),0.26), rgba(0,0,0,0) 70%), #14293A;
+  transition:background .35s ease}
+.coachart svg{width:130px;display:block;margin:0 auto}
+.coachctl{flex:1;min-width:240px}
+#coach-mouth{transform-box:fill-box;transform-origin:center;transition:transform .04s linear}
+.coachpickbtn{padding:7px 13px;font-size:13px;border-radius:8px}
+.coachpickbtn.on{background:linear-gradient(140deg,var(--accent),var(--accent2));border-color:transparent;color:#04121B;font-weight:600}
+/* One drawing, four coaches. The artwork is shared with the website on purpose,
+   so rather than four near-identical SVGs that would all have to be re-exported
+   whenever the site's changes, each persona gets its own tint of the same one.
+   Cipher is the drawing as authored, so it carries no filter at all. */
+.coachname{font-size:12px;color:var(--faint);text-align:center;margin-top:6px;letter-spacing:.4px}
+.sending.bad{color:var(--bad)} .sending.bad:before{background:var(--bad);animation:none}
+button.danger:hover{border-color:#F0705C66;color:var(--bad);background:#2015157A}
 
-.sending{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim);
-  border:1px solid var(--line);border-radius:var(--r2);background:var(--panel);padding:5px 9px;margin-top:6px}
-.sending:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0}
-.sending.ok{color:var(--good)}
-.sending.ok:before{background:var(--good)}
-.sending.bad{color:var(--bad)}
-.sending.bad:before{background:var(--bad)}
 
-/* ── option lists ──────────────────────────────────────────────────────── */
-.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px}
-.opt{display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);
-  border-radius:var(--r2);background:var(--panel);cursor:pointer}
-.opt:hover{border-color:var(--line2);background:var(--panel2)}
-.opt.sel{border-color:var(--accent);background:var(--panel2)}
-.rd{width:13px;height:13px;border-radius:50%;border:1px solid var(--line2);flex-shrink:0;margin-top:2px;position:relative}
+/* ---- the shell: sidebar plus one visible section --------------------------
+   body no longer scrolls as one column. The sidebar is fixed, the main pane
+   scrolls on its own, and the pinned block above the sections never moves. */
+.shell{display:flex;gap:0;height:100vh;margin:-26px -30px -60px;align-items:stretch}
+.side{width:196px;flex:none;background:#0A1420;border-right:1px solid var(--line);
+      padding:18px 11px 14px;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px 16px}
+.brand h1{font-size:14px;line-height:1.2}
+.brand .sub{font-size:11px}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;color:var(--dim);
+       font-size:13.5px;margin-bottom:2px;cursor:pointer;user-select:none;
+       transition:background .16s,color .16s}
+.nav a:hover{background:#10202F;color:var(--text)}
+.nav a.on{background:linear-gradient(140deg,#12303F,#0E1F2C);color:var(--text);font-weight:600;
+          box-shadow:inset 2px 0 0 var(--accent)}
+.nav .ic{width:15px;height:15px;fill:currentColor;opacity:.85;flex:none}
+.nav .n{margin-left:auto;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.sidefoot{margin-top:auto;padding-top:12px;border-top:1px solid var(--line);display:flex;
+          flex-direction:column;gap:9px}
+.sidefoot .state{margin-left:0;max-width:none;font-size:12px;padding:7px 12px}
+button.wide{width:100%;justify-content:center}
+.main{flex:1;min-width:0;overflow-y:auto;padding:20px 28px 40px}
+.pin{padding-bottom:16px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.main section{animation:rise .3s cubic-bezier(.22,.7,.3,1) both}
+.main section h2:first-child{margin-top:14px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:10px}
+.opt{display:flex;gap:12px;align-items:flex-start;background:#0E1B29;border:1px solid var(--line);
+     border-radius:11px;padding:13px 15px;cursor:pointer;transition:border-color .2s,background .2s,transform .16s}
+.opt:hover{border-color:var(--line2);transform:translateY(-1px)}
+.opt.sel{border-color:var(--accent);background:linear-gradient(150deg,#12303F,#0E1F2C)}
+.rd{width:16px;height:16px;border:2px solid #3B566E;border-radius:50%;flex:none;margin-top:3px;position:relative;transition:border-color .2s}
 .opt.sel .rd{border-color:var(--accent)}
-.rd:after{content:"";position:absolute;inset:3px;border-radius:50%;background:transparent}
-.opt.sel .rd:after{background:var(--accent)}
-.opt b{font-family:var(--fh);font-size:12px;font-weight:600;display:block}
-.opt span{font-size:10.5px;color:var(--dim);line-height:1.45;display:block}
-.opt .flag{display:inline-block;font-size:9px;letter-spacing:.06em;text-transform:uppercase;
-  border:1px solid var(--line2);border-radius:99px;padding:0 6px;color:var(--warn);margin-left:5px}
-.opt .flag.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,transparent)}
+.rd:after{content:"";position:absolute;inset:2.5px;border-radius:50%;background:var(--accent);
+          transform:scale(0);transition:transform .2s cubic-bezier(.3,1.5,.5,1)}
+.opt.sel .rd:after{transform:scale(1)}
+.opt b{font-weight:600;font-size:13.5px;display:block}
+.opt span{display:block;color:var(--dim);font-size:12.5px;margin-top:3px;line-height:1.5}
+.opt .flag{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
+           color:var(--warn);border:1px solid #F0B45C55;border-radius:20px;padding:1px 7px;margin-top:7px}
+/* A prerequisite is not a warning. Amber on "needs syncing on" made a working rule
+   look like the broken one next to it, which is the whole reason these three read
+   as unfinished for so long. */
+.opt .flag.ok{color:var(--good);border-color:#4FD19955}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px}
+.chip{font:inherit;font-size:12.5px;padding:6px 13px;border-radius:20px;cursor:pointer;
+      background:var(--panel);border:1px solid var(--line);color:var(--dim);transition:border-color .18s}
+.chip:hover{border-color:var(--line2)}
+.chip.on{background:linear-gradient(150deg,#12303F,#0E1F2C);border-color:var(--accent);color:var(--text)}
+/* What the coach is saying, in writing. Not decoration: it is the only way this
+   feature works at all for somebody deaf, muted, or unable to play sound, and it
+   lets anyone check the words against their own match rather than trusting a
+   synthetic voice they cannot re-read. */
+#coachtext{margin-top:11px;background:#0B1725;border:1px solid var(--line);
+           border-left:3px solid var(--accent);border-radius:9px;padding:11px 14px;
+           font-size:13.5px;line-height:1.62;color:var(--text);max-width:640px}
 
-.chips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px}
-.chip{font-family:var(--fh);font-size:11px;padding:3px 10px;border-radius:99px;cursor:pointer;
-  border:1px solid var(--line);background:var(--panel);color:var(--dim)}
-.chip:hover{color:var(--text);border-color:var(--line2)}
-.chip.on{background:var(--accent);border-color:var(--accent);color:var(--onAccent);font-weight:700}
-
-/* ── fields ────────────────────────────────────────────────────────────── */
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:7px}
-.fld{border:1px solid var(--line);border-radius:var(--r2);background:var(--panel);padding:7px 9px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(224px,1fr));gap:12px}
+.fld{background:#0E1B29;border:1px solid var(--line);border-radius:11px;padding:13px 15px;transition:border-color .2s}
 .fld:focus-within{border-color:var(--accent)}
-.fld label{display:block;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--faint);font-family:var(--fh);margin-bottom:3px}
-.fld input,.fld select{width:100%;background:transparent;border:0;color:var(--text);
-  font-family:var(--fb);font-size:12px;outline:none}
-.fld select{background:var(--panel)}
-.fld input[type=text]{width:100%}
-.fld input:focus,.fld select:focus{outline:none}
-.fld .h{font-size:10px;color:var(--faint);margin-top:3px;line-height:1.4}
-.hint{font-size:11.5px;color:var(--dim);line-height:1.6;margin:4px 0 8px;max-width:720px}
-.hint code{font-family:Consolas,monospace;font-size:11px;background:var(--panel2);
-  border:1px solid var(--line);border-radius:3px;padding:0 4px}
+.hint{color:var(--dim);font-size:12.5px;margin:-4px 0 12px;line-height:1.55}
+.hint code{background:#0A1723;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:12px}
+.fld input[type=text]{font-size:12.5px}
+.fld label{display:block;color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.fld input,.fld select{width:100%;margin-top:8px;background:#0A1522;color:var(--text);border:1px solid var(--line);
+       border-radius:8px;padding:9px 11px;font:inherit;font-size:14px;outline:none;transition:border-color .2s}
+.fld input:focus,.fld select:focus{border-color:var(--accent)}
+.fld .h{color:var(--faint);font-size:11.5px;margin-top:7px;line-height:1.5}
 
-/* ── clips ─────────────────────────────────────────────────────────────── */
-.clips{display:flex;flex-direction:column;gap:5px}
-.clip{display:flex;align-items:center;gap:10px;padding:6px 9px;border:1px solid var(--line);
-  border-radius:var(--r2);background:var(--panel)}
-.clip:hover{border-color:var(--line2);background:var(--panel2)}
-.shot{width:64px;height:36px;border-radius:4px;overflow:hidden;position:relative;flex-shrink:0;
-  border:1px solid var(--line);background:linear-gradient(140deg,var(--panel3),var(--bg))}
-.shot img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s}
-.clip:hover .shot img{transform:scale(1.05)}
-.shot .none{position:absolute;inset:0;display:grid;place-items:center;font-size:9px;color:var(--faint)}
-.shot .ov{position:absolute;inset:0;background:rgba(0,0,0,.35);display:grid;place-items:center;opacity:0;transition:opacity .15s}
+.clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:14px}
+.clip{background:#0E1B29;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
+      display:flex;flex-direction:column;
+      transition:transform .22s cubic-bezier(.22,.7,.3,1),border-color .22s}
+.clip:hover{transform:translateY(-3px);border-color:var(--line2)}
+.shot{position:relative;aspect-ratio:16/9;background:#0A1522;cursor:pointer;overflow:hidden}
+.shot img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s cubic-bezier(.22,.7,.3,1)}
+.clip:hover .shot img{transform:scale(1.055)}
+.shot .none{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:12.5px}
+.shot .ov{position:absolute;inset:0;background:linear-gradient(180deg,transparent 42%,#040B12E0);
+          display:flex;align-items:flex-end;padding:11px;opacity:0;transition:opacity .25s}
 .clip:hover .shot .ov{opacity:1}
-.playbtn{width:22px;height:22px;border-radius:50%;border:0;padding:0;background:var(--accent);
-  display:grid;place-items:center}
-.playbtn svg{width:10px;height:10px;fill:var(--onAccent)}
-.len{font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
-.cb{flex:1;min-width:0}
-.ct{font-family:var(--fh);font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cm{font-size:10.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;font-family:var(--fh);
-  border:1px solid var(--line2);border-radius:99px;padding:1px 7px;color:var(--dim);flex-shrink:0}
-.tag.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,transparent)}
-.tag.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
-.tag.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
-.acts{display:flex;gap:5px;align-items:center;flex-shrink:0}
-.acts button{height:22px;padding:0 8px;font-size:11px}
+.playbtn{width:38px;height:38px;border-radius:50%;background:#2FC3E8;display:flex;align-items:center;justify-content:center}
+.playbtn svg{width:15px;height:15px;fill:#04121B;margin-left:2px}
+.len{position:absolute;right:9px;bottom:9px;background:#040B12CC;border-radius:6px;padding:2px 8px;
+     font-size:11.5px;font-weight:600;letter-spacing:.3px}
+.cb{padding:12px 14px 4px;flex:1}
+.ct{font-weight:600;font-size:13.5px;letter-spacing:-.1px}
+.cm{color:var(--faint);font-size:12px;margin-top:4px}
+.tag{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
+     padding:2px 8px;border-radius:20px;margin-top:9px;border:1px solid #F0B45C55;color:var(--warn)}
+/* margin-top:auto pins the buttons to the bottom of every card, so a clip
+   without a warning tag does not sit its controls higher than its neighbours. */
+.acts{display:flex;gap:7px;padding:11px 14px 14px;margin-top:auto}
+.acts button{flex:1;justify-content:center;padding:7px 4px;font-size:12.5px;white-space:nowrap}
 
-.empty{text-align:center;padding:34px 16px;color:var(--faint)}
-.empty svg{width:26px;height:26px;fill:var(--line2);margin-bottom:8px}
-.empty p{font-size:12px}
-.empty p.small{font-size:10.5px;margin-top:4px}
-.skel{background:linear-gradient(90deg,var(--panel) 25%,var(--panel2) 50%,var(--panel) 75%);
-  background-size:200% 100%;animation:sk 1.3s linear infinite;border-radius:var(--r2);height:52px}
-@keyframes sk{to{background-position:-200% 0}}
+.empty{background:#0C1826;border:1px dashed var(--line2);border-radius:var(--r);padding:40px 24px;text-align:center}
+.empty svg{width:34px;height:34px;fill:#33526C;margin-bottom:12px}
+.empty p{color:var(--dim);font-size:13.5px}
+.empty p.small{color:var(--faint);font-size:12.5px;margin-top:6px}
 
-/* ── coach ─────────────────────────────────────────────────────────────── */
-.coachbox{display:grid;grid-template-columns:132px 1fr;gap:14px;align-items:start;
-  border:1px solid var(--line);border-radius:var(--r);background:var(--panel);padding:11px}
-.coachart{width:132px;height:132px;border-radius:var(--r2);overflow:hidden;background:var(--bg2)}
-.coachart svg{width:100%;height:100%;display:block;transform-box:fill-box;transform-origin:center}
-.coachctl{min-width:0}
-.coachname{text-align:center;font-family:var(--fh);font-size:11.5px;color:var(--dim);margin-top:5px}
-.coachpickbtn{height:22px;padding:0 9px;font-size:11px}
-.coachpickbtn.on{background:var(--accent);border-color:var(--accent);color:var(--onAccent);font-weight:700}
-#coach-mouth{transform-box:fill-box;transform-origin:center}
-#coachtext{border:1px solid var(--line);border-radius:var(--r2);background:var(--panel);
-  padding:9px 11px;margin-top:8px;font-size:11.5px;line-height:1.65;color:var(--dim);max-height:210px;overflow:auto}
+.skel{background:#0E1B29;border:1px solid var(--line);border-radius:var(--r);height:104px;
+  background-image:linear-gradient(100deg,#0E1B29 8%,#152838 20%,#0E1B29 34%);background-size:760px 100%;
+  animation:shimmer 1.35s linear infinite}
 
-/* ── editor ────────────────────────────────────────────────────────────── */
-.edwrap{display:grid;grid-template-columns:1fr 244px;gap:11px;align-items:start}
-@media(max-width:900px){.edwrap{grid-template-columns:1fr}}
-.stage{background:#05090E;border:1px solid var(--line);border-radius:var(--r);aspect-ratio:16/9;
-  display:grid;place-items:center;position:relative;overflow:hidden}
-.stage video{width:100%;height:100%;object-fit:contain;background:#000}
-.stagetxt{text-align:center;color:var(--faint);font-size:11.5px}
-.tl{margin-top:8px;position:relative;height:42px;border:1px solid var(--line);
-  border-radius:var(--r2);background:var(--panel);overflow:hidden;cursor:crosshair}
-.wave{position:absolute;inset:0;display:flex;align-items:center;gap:1px;padding:0 2px;opacity:.45}
-.wave i{flex:1;background:var(--line2);border-radius:1px}
-.edsel{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--accent) 15%,transparent);
-  border-left:2px solid var(--accent);border-right:2px solid var(--accent)}
-.ph{position:absolute;top:0;bottom:0;width:1px;background:var(--text);opacity:.8}
-.split{position:absolute;top:0;bottom:0;width:2px;background:var(--warn)}
-.times{display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);
-  margin-top:5px;font-variant-numeric:tabular-nums}
-.iobox{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
-  border-radius:var(--r2);padding:3px 9px;font-size:11px;font-variant-numeric:tabular-nums}
-.iobox b{font-family:var(--fh);color:var(--accent);font-weight:700}
-.edcard{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);padding:9px 11px}
-.edrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);font-size:11.5px}
-.edrow:last-child{border-bottom:0}
-.edrow span:first-child{flex:1;color:var(--dim)}
-.stack{display:flex;flex-direction:column;gap:5px}
+#fatal{display:none;background:#1A1012;border:1px solid #F0705C55;border-left:3px solid var(--bad);
+       border-radius:0 10px 10px 0;padding:16px 18px;margin:16px 0}
+#fatal h3{font-size:15px;font-weight:600;margin-bottom:6px}
+#fatal p{color:var(--dim);font-size:13.5px;line-height:1.6}
 
-/* ── appearance ────────────────────────────────────────────────────────── */
-.sw{display:flex;gap:6px;flex-wrap:wrap}
-.swatch{display:flex;align-items:center;gap:7px;padding:5px 9px;border-radius:var(--r2);
-  border:1px solid var(--line2);background:var(--panel);cursor:pointer;font-family:var(--fh);font-size:11px}
-.swatch:hover{background:var(--panel2)}
-.swatch.on{border-color:var(--accent);background:var(--panel2)}
-.dab{width:22px;height:14px;border-radius:3px;border:1px solid rgba(255,255,255,.14);flex-shrink:0}
-
-/* ── fatal, toast, foot ────────────────────────────────────────────────── */
-#fatal{display:none;border:1px solid var(--bad);border-left:2px solid var(--bad);
-  border-radius:var(--r);background:var(--panel);padding:12px 14px;margin-bottom:10px}
-#fatal h3{font-family:var(--fh);font-size:13px;margin-bottom:5px}
-#fatal p{font-size:11.5px;color:var(--dim);line-height:1.55}
-#toast{position:fixed;left:50%;bottom:16px;transform:translate(-50%,14px);opacity:0;pointer-events:none;
-  display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line2);
-  border-radius:99px;padding:7px 14px;font-size:11.5px;transition:opacity .18s,transform .18s;z-index:40}
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,26px);background:#152838;
+       border:1px solid var(--line2);border-radius:10px;padding:12px 22px;font-size:13.5px;
+       opacity:0;pointer-events:none;transition:opacity .28s,transform .28s cubic-bezier(.22,.7,.3,1);
+       box-shadow:0 12px 34px #0006;display:flex;align-items:center;gap:10px}
 #toast.show{opacity:1;transform:translate(-50%,0)}
-#toast .sp{width:7px;height:7px;border-radius:50%;background:var(--good)}
-#toast.busy .sp{background:var(--accent);animation:sk 1s linear infinite}
-.foot{margin-top:auto;padding-top:12px;font-size:10.5px;color:var(--faint);border-top:1px solid var(--line)}
-.tiny{font-size:10.5px}.muted{color:var(--dim)}.grow{flex:1;min-width:0}
-.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
+#toast .sp{width:14px;height:14px;border:2px solid #2FC3E840;border-top-color:var(--accent);
+           border-radius:50%;animation:spin .7s linear infinite;display:none}
+#toast.busy .sp{display:block}
+.foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);color:var(--faint);font-size:12.5px}
 </style>
 </head>
 <body>
@@ -375,10 +322,8 @@ button.qlen{height:22px;padding:0 9px;font-size:11px;background:var(--panel2)}
   <nav class="nav" id="nav">
     <a data-sec="dashboard" class="on" onclick="showSec(&#39;dashboard&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>Dashboard</a>
     <a data-sec="clips" onclick="showSec(&#39;clips&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm3 2.5v7l6-3.5-6-3.5z"/></svg>Clips<span class="n" id="clipn"></span></a>
-    <a data-sec="editor" onclick="showSec(&#39;editor&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M9.6 7.4 4 3 3 4l5.6 4.4L9.6 7.4zM14.4 7.4 20 3l1 1-5.6 4.4-1-1zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 21l5.6-4.4L8.6 15.6 3 20l1 1zm16 0 1-1-5.6-4.4-1 1L20 21z"/></svg>Editor</a>
     <a data-sec="results" onclick="showSec(&#39;results&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 20h3v-8H4v8zm6.5 0h3V4h-3v16zM17 20h3v-5h-3v5z"/></svg>Results</a>
     <a data-sec="recording" onclick="showSec(&#39;recording&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 15a5 5 0 110-10 5 5 0 010 10z"/></svg>Recording</a>
-    <a data-sec="appearance" onclick="showSec(&#39;appearance&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 2 2 0 0 0 2-2v-1a2 2 0 0 1 2-2h1a3 3 0 0 0 3-3A10 10 0 0 0 12 2zM6.5 12A1.5 1.5 0 1 1 8 10.5 1.5 1.5 0 0 1 6.5 12zm3-4A1.5 1.5 0 1 1 11 6.5 1.5 1.5 0 0 1 9.5 8zm5 0A1.5 1.5 0 1 1 16 6.5 1.5 1.5 0 0 1 14.5 8zm3 4A1.5 1.5 0 1 1 19 10.5 1.5 1.5 0 0 1 17.5 12z"/></svg>Appearance</a>
     <a data-sec="sounds" onclick="showSec(&#39;sounds&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0014 7.97v8.05A4.47 4.47 0 0016.5 12z"/></svg>Sounds</a>
     <a data-sec="about" onclick="showSec(&#39;about&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>About</a>
   </nav>
@@ -433,81 +378,6 @@ button.qlen{height:22px;padding:0 9px;font-size:11px;background:var(--panel2)}
   <h2>Your clips</h2>
   <div id="clipchips" class="chips"></div>
   <div id="clips"><div class="skel" style="height:210px"></div></div>
-</section>
-
-<section id="sec-editor" hidden>
-  <div class="row" style="margin-top:0">
-    <div class="grow">
-      <div class="ct" id="ed-name">No clip open</div>
-      <div class="cm" id="ed-meta">Open the Clips list and press Edit on any clip.</div>
-    </div>
-    <button class="sm" id="ed-prev" onclick="edStep(-1)">Previous</button>
-    <button class="sm" id="ed-next" onclick="edStep(1)">Next</button>
-  </div>
-
-  <div class="edwrap" style="margin-top:9px">
-    <div>
-      <div class="stage">
-        <video id="ed-video" preload="metadata" playsinline></video>
-        <div class="stagetxt" id="ed-placeholder">no clip open</div>
-      </div>
-
-      <div class="tl" id="ed-tl">
-        <div class="wave" id="ed-wave"></div>
-        <div class="edsel" id="ed-sel"></div>
-        <div class="ph" id="ed-ph"></div>
-      </div>
-      <div class="times"><span>0:00</span><span id="ed-cur">0:00</span><span id="ed-total">0:00</span></div>
-
-      <div class="row">
-        <span class="iobox">In <b id="ed-in">0:00</b></span>
-        <span class="iobox">Out <b id="ed-out">0:00</b></span>
-        <span class="iobox">Length <b id="ed-len">0:00</b></span>
-        <span class="grow"></span>
-        <button class="sm" onclick="edPlayPause()" id="ed-play">Play</button>
-        <button class="sm" onclick="edSetIn()">Set in</button>
-        <button class="sm" onclick="edSetOut()">Set out</button>
-        <button class="sm" onclick="edAddSplit()">Add split</button>
-        <button class="sm ghost" onclick="edReset()">Reset</button>
-      </div>
-      <div class="savehint" id="ed-msg"></div>
-    </div>
-
-    <div>
-      <div class="edcard" style="margin-bottom:9px">
-        <div class="k" style="font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:5px">This clip</div>
-        <div class="edrow"><span>Round</span><b id="ed-round">-</b></div>
-        <div class="edrow"><span>Why it was kept</span><b id="ed-reason">-</b></div>
-        <div class="edrow"><span>Original length</span><b id="ed-origlen">-</b></div>
-        <div class="edrow"><span>Size</span><b id="ed-size">-</b></div>
-        <div class="edrow"><span>Boundaries</span><b id="ed-bounds">-</b></div>
-      </div>
-
-      <div class="edcard">
-        <div class="k" style="font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:7px">Save</div>
-        <div class="stack">
-          <button class="primary" onclick="edSave(&#39;new&#39;)">Save as a new clip</button>
-          <button onclick="edSave(&#39;split&#39;)" id="ed-splitbtn">Save the pieces</button>
-          <button onclick="edSave(&#39;replace&#39;)">Replace the original</button>
-          <button class="primary" onclick="edSave(&#39;send&#39;)">Send to SiegeIQ</button>
-        </div>
-        <div class="savehint" style="line-height:1.55">A trim is a straight copy, so it is near
-          instant and loses no quality. The original is kept unless you choose replace.</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="sec-appearance" hidden>
-  <h2>Theme</h2>
-  <div class="sw" id="ap-themes"></div>
-  <h2>Typeface</h2>
-  <div class="sw" id="ap-fonts"></div>
-  <p class="hint">All three ship with Windows, so nothing is downloaded and this app still
-    opens no connections of its own.</p>
-  <h2>Density</h2>
-  <div class="sw" id="ap-dens"></div>
-  <div class="savehint" id="ap-msg"></div>
 </section>
 
 <section id="sec-results" hidden>
@@ -630,10 +500,6 @@ var RULES=[
  ["my_deaths","Only rounds I died in","Every round you were killed in, drone phase trimmed off.","needs syncing on"],
  ["my_kills","Only rounds I got a kill","Every round you got at least one kill, drone phase trimmed off.","needs syncing on"],
  ["clutches","Only my clutch rounds","Rounds you won as the last player alive.","needs syncing on"],
- // Added 2026-08-24. The first rule that cuts to a MOMENT rather than to a round.
- // It needs the kill times the upload reply now carries; a round the backend could
- // not place a kill on the clock keeps its action phase and says so on the clip.
- ["kill_moments","Just the moment of each kill","A few seconds either side of every kill, instead of the whole round.","needs syncing on"],
  ["nothing","Nothing automatically","Buffer only. You save moments by hand.",""]
 ];
 
@@ -1280,210 +1146,6 @@ function chaseThumbs(n){
 // anything the paint functions do to these elements and cannot be fought by a
 // stylesheet rule somebody adds later.
 var CURSEC="dashboard";
-/* ═══════════════════════════════════════════════════════════════════════════
-   CLIP EDITOR. Added 2026-08-24.
-
-   WHY THIS EXISTS. The three smart keep rules cut whole rounds, because the only
-   per-round detail the client has is a count - kills, died, clutched - and never
-   a moment. A "kills only" clip is therefore the entire action phase of a round
-   that contained a kill, which is usually two minutes for a five second moment.
-   Until the decode hands back real kill times, trimming by hand is the fix, and
-   afterwards it is still the thing you reach for when the automatic cut is close
-   but not right.
-
-   THE PREVIEW IS A PLAIN VIDEO ELEMENT. The window is loaded from file://, so a
-   clip on the same disk plays with no server, no bridge call and no copy. That
-   also means the browser gives us the true duration, which is why the editor
-   needs exactly ONE new call into the app: the save.
-   ══════════════════════════════════════════════════════════════════════════ */
-var ED = { path:"", dur:0, inP:0, outP:1, splits:[], meta:null, idx:-1 };
-
-function edFmt(s){
-  if(!isFinite(s)||s<0) s=0;
-  var m=Math.floor(s/60), r=s-m*60;
-  return m+":"+(r<10?"0":"")+r.toFixed(1);
-}
-function edMsg(t,bad){
-  var e=document.getElementById("ed-msg"); if(!e) return;
-  e.textContent=t||""; e.style.color = bad ? "var(--bad)" : "var(--faint)";
-}
-function edWave(){
-  var w=document.getElementById("ed-wave"); if(!w||w.childElementCount) return;
-  for(var i=0;i<170;i++){
-    var b=document.createElement("i");
-    b.style.height=(12+Math.abs(Math.sin(i*0.37))*26+Math.abs(Math.sin(i*0.11))*7)+"%";
-    w.appendChild(b);
-  }
-}
-function edDraw(){
-  var sel=document.getElementById("ed-sel"), ph=document.getElementById("ed-ph"),
-      v=document.getElementById("ed-video"), tl=document.getElementById("ed-tl");
-  if(!sel||!tl) return;
-  sel.style.left=(ED.inP*100)+"%";
-  sel.style.width=Math.max(0,(ED.outP-ED.inP)*100)+"%";
-  var cur = (v&&ED.dur) ? (v.currentTime/ED.dur) : 0;
-  ph.style.left=(cur*100)+"%";
-  document.getElementById("ed-in").textContent  = edFmt(ED.inP*ED.dur);
-  document.getElementById("ed-out").textContent = edFmt(ED.outP*ED.dur);
-  document.getElementById("ed-len").textContent = edFmt((ED.outP-ED.inP)*ED.dur);
-  document.getElementById("ed-cur").textContent = edFmt(cur*ED.dur);
-  document.getElementById("ed-total").textContent = edFmt(ED.dur);
-  /* Split markers are redrawn rather than moved, because there are never many and
-     rebuilding three nodes is cheaper to reason about than tracking them. */
-  var olds=tl.querySelectorAll(".split");
-  for(var i=0;i<olds.length;i++) olds[i].remove();
-  for(var j=0;j<ED.splits.length;j++){
-    var d=document.createElement("div"); d.className="split";
-    d.style.left=(ED.splits[j]*100)+"%"; tl.appendChild(d);
-  }
-  var sb=document.getElementById("ed-splitbtn");
-  if(sb) sb.textContent = ED.splits.length ? ("Save the "+(ED.splits.length+1)+" pieces") : "Save the pieces";
-}
-
-/* openClip is what the Edit button on a clip row calls. c is the same clip object
-   the list already has, so nothing is fetched twice. */
-function edOpen(c, idx){
-  if(!c || !c.path){ return; }
-  ED.path=c.path; ED.meta=c; ED.splits=[]; ED.inP=0; ED.outP=1; ED.dur=0;
-  ED.idx = (typeof idx==="number") ? idx : -1;
-  showSec("editor");
-  edWave();
-  document.getElementById("ed-name").textContent = c.name || c.path;
-  var bits=[];
-  if(c.round) bits.push("Round "+c.round);
-  if(c.reason) bits.push(c.reason);
-  if(c.keep_rule) bits.push("rule: "+c.keep_rule);
-  document.getElementById("ed-meta").textContent = bits.join("  ·  ") || " ";
-  document.getElementById("ed-round").textContent  = c.round ? String(c.round) : "-";
-  document.getElementById("ed-reason").textContent = c.reason || "-";
-  document.getElementById("ed-origlen").textContent= c.duration_sec ? edFmt(c.duration_sec) : "-";
-  document.getElementById("ed-size").textContent   = c.size_mb ? (c.size_mb.toFixed(1)+" MB") : "-";
-  var bd=document.getElementById("ed-bounds");
-  bd.textContent = c.estimated ? "estimated" : "decoded";
-  bd.style.color = c.estimated ? "var(--warn)" : "var(--good)";
-
-  var v=document.getElementById("ed-video"), ph=document.getElementById("ed-placeholder");
-  edMsg("");
-  /* Windows paths need forward slashes and encoding to survive as a URL. A path
-     with a space or an apostrophe in it is normal in a Videos folder. */
-  var url = "file:///" + String(c.path).replace(/\\/g,"/").split("/").map(encodeURIComponent).join("/");
-  v.src=url; v.style.display="block"; if(ph) ph.style.display="none";
-  v.onloadedmetadata=function(){
-    ED.dur = v.duration || c.duration_sec || 0;
-    ED.inP=0; ED.outP=1; edDraw();
-  };
-  v.ontimeupdate=function(){ edDraw(); };
-  v.onerror=function(){
-    if(ph){ ph.style.display=""; ph.textContent="that clip could not be opened for preview"; }
-    v.style.display="none";
-    ED.dur = c.duration_sec || 0; edDraw();
-  };
-  edDraw();
-}
-function edStep(d){
-  if(!C || !C.length) return;
-  var i = ED.idx + d;
-  if(i<0) i=0; if(i>=C.length) i=C.length-1;
-  edOpen(C[i], i);
-}
-function edSeekFromEvent(e){
-  var tl=document.getElementById("ed-tl"); if(!tl||!ED.dur) return;
-  var r=tl.getBoundingClientRect();
-  var p=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width));
-  var v=document.getElementById("ed-video");
-  if(v && isFinite(ED.dur)) { try{ v.currentTime = p*ED.dur; }catch(err){} }
-  edDraw();
-}
-function edPlayPause(){
-  var v=document.getElementById("ed-video"), b=document.getElementById("ed-play");
-  if(!v||!v.src) return;
-  if(v.paused){ v.play(); b.textContent="Pause"; } else { v.pause(); b.textContent="Play"; }
-}
-function edCurP(){
-  var v=document.getElementById("ed-video");
-  return (v&&ED.dur) ? Math.min(1,Math.max(0,v.currentTime/ED.dur)) : 0;
-}
-function edSetIn(){  ED.inP  = Math.min(edCurP(), ED.outP-0.001); edDraw(); }
-function edSetOut(){ ED.outP = Math.max(edCurP(), ED.inP +0.001); edDraw(); }
-function edAddSplit(){
-  var p=edCurP();
-  if(p<=ED.inP||p>=ED.outP){ edMsg("a split has to sit inside the in and out points", true); return; }
-  ED.splits.push(p); ED.splits.sort(function(a,b){return a-b;}); edMsg(""); edDraw();
-}
-function edReset(){ ED.inP=0; ED.outP=1; ED.splits=[]; edMsg(""); edDraw(); }
-
-function edSave(mode){
-  if(!ED.path){ edMsg("open a clip first", true); return; }
-  if(!ED.dur){ edMsg("this clip has no readable length, so it cannot be trimmed here", true); return; }
-  var payload={
-    path: ED.path,
-    in_sec: ED.inP*ED.dur,
-    out_sec: ED.outP*ED.dur,
-    mode: mode,
-    splits: ED.splits.map(function(p){ return p*ED.dur; })
-  };
-  if(mode!=="split") payload.splits=[];
-  edMsg(mode==="send" ? "trimming and sending..." : "trimming...");
-  goT("goTrimClip", JSON.stringify(payload), 60000).then(function(raw){
-    var d={}; try{ d=JSON.parse(raw||"{}"); }catch(e){}
-    if(!d.ok){ edMsg(d.error || "the trim did not finish", true); return; }
-    edMsg(d.message || "done");
-    toast(d.message || "Clip saved");
-    loadClips();
-  });
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   APPEARANCE. Themes and typefaces are tokens on the root element, so switching
-   one is an attribute change and nothing re-renders. The choice is stored by the
-   app rather than by the page, because the page is rewritten to disk on every
-   launch and anything it kept locally would not survive an update.
-   ══════════════════════════════════════════════════════════════════════════ */
-var THEMES=[["cyan","SiegeIQ cyan","#2FC3E8","#0D1926"],["slate","Slate","#8FA6C4","#141922"],
-            ["amber","Amber","#E8A94B","#1C150C"],["violet","Violet","#A47CF3","#171128"]];
-var FONTS=[["ui","Standard"],["condensed","Condensed"],["mono","Technical"]];
-var DENS=[["compact","Compact"],["cosy","Comfortable"]];
-var UIPREF={theme:"cyan",font:"ui",density:"compact"};
-
-function applyUIPrefs(){
-  var r=document.documentElement;
-  if(UIPREF.theme && UIPREF.theme!=="cyan") r.setAttribute("data-theme",UIPREF.theme); else r.removeAttribute("data-theme");
-  if(UIPREF.font && UIPREF.font!=="ui") r.setAttribute("data-font",UIPREF.font); else r.removeAttribute("data-font");
-  if(UIPREF.density && UIPREF.density!=="compact") r.setAttribute("data-density",UIPREF.density); else r.removeAttribute("data-density");
-}
-function paintAppearance(){
-  var t=document.getElementById("ap-themes"), f=document.getElementById("ap-fonts"), d=document.getElementById("ap-dens");
-  if(!t) return;
-  t.innerHTML=""; f.innerHTML=""; d.innerHTML="";
-  THEMES.forEach(function(x){
-    var b=document.createElement("div");
-    b.className="swatch"+(UIPREF.theme===x[0]?" on":"");
-    b.innerHTML='<span class="dab" style="background:linear-gradient(135deg,'+x[2]+','+x[3]+')"></span>'+x[1];
-    b.onclick=function(){ UIPREF.theme=x[0]; applyUIPrefs(); paintAppearance(); saveUIPrefs(); };
-    t.appendChild(b);
-  });
-  FONTS.forEach(function(x){
-    var b=document.createElement("div");
-    b.className="swatch"+(UIPREF.font===x[0]?" on":"");
-    b.textContent=x[1];
-    b.onclick=function(){ UIPREF.font=x[0]; applyUIPrefs(); paintAppearance(); saveUIPrefs(); };
-    f.appendChild(b);
-  });
-  DENS.forEach(function(x){
-    var b=document.createElement("div");
-    b.className="swatch"+(UIPREF.density===x[0]?" on":"");
-    b.textContent=x[1];
-    b.onclick=function(){ UIPREF.density=x[0]; applyUIPrefs(); paintAppearance(); saveUIPrefs(); };
-    d.appendChild(b);
-  });
-}
-function saveUIPrefs(){
-  var m=document.getElementById("ap-msg");
-  go("goSaveUIPrefs", JSON.stringify(UIPREF)).then(function(){
-    if(m){ m.textContent="Saved."; setTimeout(function(){ if(m) m.textContent=""; },1600); }
-  });
-}
-
 function showSec(name){
   CURSEC=name;
   var secs=document.querySelectorAll(".main section");
@@ -1494,8 +1156,6 @@ function showSec(name){
   // Clips are the one section worth re-fetching on arrival, because a clip
   // saved while another section was open would otherwise not be there.
   if(name==="clips") loadClips();
-  if(name==="appearance") paintAppearance();
-  if(name==="editor") edWave();
   // Results are worth re-asking for on arrival too: a match played while another
   // section was open is exactly the one somebody opens this tab to look at.
   if(name==="results") loadResults();
@@ -1521,14 +1181,7 @@ function ab(k,v){
    +esc(v)+"</div></div>";
 }
 
-function adoptUIPrefs(st){
-  if(!st) return;
-  if(st.ui_theme)   UIPREF.theme   = st.ui_theme;
-  if(st.ui_font)    UIPREF.font    = st.ui_font;
-  if(st.ui_density) UIPREF.density = st.ui_density;
-  applyUIPrefs();
-}
-function paintStatus(){ adoptUIPrefs(S);
+function paintStatus(){
   document.getElementById("ver").textContent="version "+S.app_version;
   var pill=document.getElementById("statepill");
   var d=document.getElementById("statedot");
@@ -1725,8 +1378,6 @@ function paintFields(){
    +num("clip_disk_mb","Clips limit (MB)",settings.clip_disk_mb,"Oldest clips are removed once this is passed.")
    +num("clip_keep_days","Keep clips for (days)",settings.clip_keep_days,"Clips older than this are removed.")
    +num("last_seconds","Last seconds per round",settings.last_seconds,"Used by the last-seconds keep rule.")
-   +num("kill_lead_sec","Before each kill (seconds)",settings.kill_lead_sec,"Used by the kill-moment rule. A Siege kill is decided by the couple of seconds before it.")
-   +num("kill_trail_sec","After each kill (seconds)",settings.kill_trail_sec,"Used by the kill-moment rule. Enough to see the outcome.")
    +num("pre_pad_sec","Extra before (seconds)",settings.pre_pad_sec,"Padding at the front, to absorb boundary error.")
    +num("post_pad_sec","Extra after (seconds)",settings.post_pad_sec,"Padding at the end of each clip.")
    +selLabelled("send_to_ai","Send clips to AI Analyze",settings.send_to_ai,
@@ -1911,7 +1562,6 @@ function paintClips(){
      +sendLine(c.path)
      +'</div><div class="acts">'
      +'<button onclick="event.stopPropagation();play('+i+')">Play</button>'
-     +'<button onclick="event.stopPropagation();edOpen(C['+i+'],'+i+')">Edit</button>'
      +(S.clip_upload_live?('<button title="Send this clip to AI Analyze" onclick="event.stopPropagation();send('+i+')">Send</button>'):'')
      +'<button class="danger" onclick="event.stopPropagation();del('+i+')">Delete</button>'
      +'</div></div>';
@@ -1967,12 +1617,6 @@ whenReady(function(){
   announcePainted();
   setInterval(function(){ goJ("goStatus").then(function(s){ if(s){S=s;paintStatus();} }); },2500);
 });
-
-(function edInit(){
-  var tl=document.getElementById("ed-tl");
-  if(tl){ tl.addEventListener("mousedown", edSeekFromEvent); }
-})();
 </script>
 </body>
-</html>
-`
+</html>`
