@@ -203,12 +203,24 @@ func onReady() {
 			case <-mUpdate.ClickedCh:
 				// Network + a dialog: run off the event loop so the menu stays responsive.
 				go func() {
-					if info := updateAvailable(); info != nil {
+					info, err := updateAvailable()
+					switch {
+					case err != nil:
+						// NOT "you're up to date". We did not get to find out.
+						showDialog(dialogSpec{
+							instruction: "Could not check for updates",
+							content: "SiegeIQ could not reach the update server just now, so " +
+								"there is no way to tell whether a newer version exists. This is " +
+								"usually a brief network problem - it will keep trying on its own, " +
+								"or you can click this again in a minute.",
+							buttonText: "Close",
+						})
+					case info != nil:
 						// Same silent path as startup. Somebody who clicked "Check for
 						// updates" has already said yes; asking again is a second
 						// chance to accidentally decline.
 						autoUpdate(info)
-					} else {
+					default:
 						showDialog(dialogSpec{
 							instruction: "You're up to date",
 							content:     fmt.Sprintf("SiegeIQ Sync v%s is the latest version.", version),
@@ -269,11 +281,14 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 		logf("started after a self-update into v%s", from)
 		notifyUpdated(from)
 	}
-	if info := updateAvailable(); info != nil {
+	if info, _ := updateAvailable(); info != nil {
 		logf("update available: v%s", info.Version)
 		mStatus.SetTitle("Updating to v" + info.Version + "...")
 		autoUpdate(info) // installs and restarts, exiting this process
 	}
+	// And keep checking. The line above runs seconds after login, when DNS is often
+	// not up yet, and one failed check used to mean no update ever.
+	startUpdateWatcher()
 
 	cfgPath := filepath.Join(configDir(), "config.json")
 	stPath := filepath.Join(configDir(), "state.json")

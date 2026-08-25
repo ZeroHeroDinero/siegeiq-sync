@@ -87,21 +87,32 @@ func fetchLatest() (*latestInfo, error) {
 	return &info, nil
 }
 
-// updateAvailable returns the newer build's info, or nil if we're current or
-// the check failed (failures are logged, never fatal - they must never block
-// startup).
-func updateAvailable() *latestInfo {
+// updateAvailable returns the newer build's info, or nil if we're current.
+//
+// THREE OUTCOMES, NOT TWO, and collapsing them is what made the tray button lie.
+//
+//	info, nil   an update is ready
+//	nil,  nil   we are current
+//	nil,  err   we could not ask
+//
+// It used to return a bare *latestInfo, so "Check for updates" showed "You're up
+// to date" after a failed lookup. On this machine every check between 08:51 and
+// 20:13 on 2026-08-24 failed with "dial tcp: lookup ... no such host" - Sync starts
+// with Windows and asks before DNS is ready - and each one was reported to the
+// player as being current. Telling somebody they are on the newest build when you
+// could not reach the server is worse than telling them nothing.
+func updateAvailable() (*latestInfo, error) {
 	info, err := fetchLatest()
 	if err != nil {
 		logf("update check skipped: %v", err)
-		return nil
+		return nil, err
 	}
 	if info.Version == "" || !versionLess(version, info.Version) {
-		return nil
+		return nil, nil
 	}
 	if info.URL == "" {
 		logf("update v%s is available but no download URL was published", info.Version)
-		return nil
+		return nil, nil
 	}
 	if info.SHA256 == "" {
 		// Don't even offer an update we know applyUpdate will refuse (see the fail-closed
@@ -109,9 +120,41 @@ func updateAvailable() *latestInfo {
 		// an "Update now" button that always ends in an error dialog.
 		logf("update v%s is available but the server published no sha256 - not offering it "+
 			"until SYNC_LATEST_SHA256 is set on the backend", info.Version)
-		return nil
+		return nil, nil
 	}
-	return info
+	return info, nil
+}
+
+// startUpdateWatcher keeps asking, because asking once was not enough.
+//
+// The startup check happens before the network is reliably up - Sync launches with
+// Windows - and until 2026-08-25 nothing ever tried again. A player who never opened
+// the tray menu stayed on whatever build they installed, forever, which is why fixes
+// kept not reaching people who had the app running the whole time.
+//
+// NEVER MID-MATCH. Installing exits the process to relaunch the new build, so a check
+// that fires while Siege is up would end the recording the player is relying on. It
+// waits for a quiet moment instead; there is no hurry.
+func startUpdateWatcher() {
+	go func() {
+		// Short retries first, for the boot-time DNS case, then a slow heartbeat.
+		for _, d := range []time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute} {
+			time.Sleep(d)
+			if _, err := updateAvailable(); err == nil {
+				break // the server answered; the slow loop takes it from here
+			}
+		}
+		for {
+			time.Sleep(6 * time.Hour)
+			if siegeRunning() || rec.capturing() {
+				continue
+			}
+			if info, err := updateAvailable(); err == nil && info != nil {
+				logf("update available in the background: v%s", info.Version)
+				autoUpdate(info) // installs and restarts, exiting this process
+			}
+		}
+	}()
 }
 
 // updatedMarkerPath is where a self-update leaves a note for the version that replaces

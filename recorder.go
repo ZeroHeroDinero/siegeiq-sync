@@ -110,6 +110,13 @@ type recorder struct {
 	// restart of the app.
 	encoderDemoted bool
 
+	// methodUnpinned means the saved capture method produced NO FRAMES in game and
+	// this session has fallen back to letting the app choose, which is what lets the
+	// window-native grab take over.
+	//
+	// Session-only, cleared by configure(), exactly like encoderDemoted.
+	methodUnpinned bool
+
 	// siegeWasRunning tracks the last tick's answer, so a fresh launch of the
 	// game can clear a give-up state. Somebody who quits Siege, changes their
 	// display mode and comes back should not have to find a button in this app
@@ -143,6 +150,7 @@ func (r *recorder) configure(cfg *config) {
 	// Any settings change, and the capture self-test, is a fresh reason to
 	// believe the hardware encoder might work. See encoderDemoted.
 	r.encoderDemoted = false
+	r.methodUnpinned = false
 }
 
 func (r *recorder) setStatusFn(fn func(string)) {
@@ -198,6 +206,11 @@ const (
 )
 
 func (r *recorder) noteFailure(err error) {
+	// Worked out BEFORE the lock: both touch Windows and the warmed capability
+	// cache, and neither needs the recorder's own state.
+	noFrames := isNoFrameFailure(err)
+	windowNative := windowNativeAvailable()
+
 	r.mu.Lock()
 	if !r.captureStarted.IsZero() && time.Since(r.captureStarted) >= healthyCaptureSeconds*time.Second {
 		ran := time.Since(r.captureStarted).Round(time.Second)
@@ -213,9 +226,38 @@ func (r *recorder) noteFailure(err error) {
 	}
 	r.captureStarted = time.Time{}
 
-	// The graphics card refused to open its encoder. Fall back to the processor
-	// for this session rather than spending a strike on a fault we can fix.
-	if !r.encoderDemoted && r.rc.Encoder != "cpu" && isEncoderOpenFailure(err) {
+	// NO FRAMES ARRIVED. This is the one that mattered, and it spent two days
+	// wearing an encoder's name.
+	//
+	// ffmpeg reports it as "Could not open encoder before EOF" plus "at least one
+	// of its streams received no packets", which reads as the encoder refusing.
+	// It is not: the encoder is configured from the first frame, so when the grab
+	// delivers nothing the encoder never opens and ffmpeg blames the encoder on
+	// the way out. Measured 2026-08-25 - libx264 failed with the identical error
+	// after the fallback to the processor, which is proof the encoder was never
+	// the problem.
+	//
+	// The real cause is a saved capture method that cannot see a fullscreen game.
+	// Letting the app choose again hands it to the window-native grab, which can.
+	if !r.methodUnpinned && noFrames && windowNative &&
+		(r.rc.CaptureMethod == "ddagrab" || r.rc.CaptureMethod == "gdigrab") {
+		r.methodUnpinned = true
+		r.failures = 0
+		r.nextTry = time.Now().Add(2 * time.Second)
+		if err != nil {
+			r.lastError = err.Error()
+		}
+		r.mu.Unlock()
+		logf("recorder: the saved screen grab returned no frames, so this session switches to "+
+			"capturing the game window directly. Original error: %v", err)
+		r.setStatus("Recording the game window directly - the screen grab returned nothing")
+		return
+	}
+
+	// The graphics card refused to open its encoder, and it is NOT the no-frames
+	// case above. Fall back to the processor for this session rather than spending
+	// a strike on a fault we can fix.
+	if !r.encoderDemoted && !noFrames && r.rc.Encoder != "cpu" && isEncoderOpenFailure(err) {
 		r.encoderDemoted = true
 		r.failures = 0
 		r.nextTry = time.Now().Add(2 * time.Second)
@@ -274,6 +316,48 @@ func (r *recorder) effectiveEncoder(rc recorderConfig) string {
 		return "cpu"
 	}
 	return rc.Encoder
+}
+
+// effectiveMethod is the capture method the NEXT capture should use. The saved
+// setting unless it already proved it cannot see the game, in which case the app
+// chooses - and choosing prefers the window-native grab.
+func (r *recorder) effectiveMethod(rc recorderConfig) string {
+	r.mu.Lock()
+	unpinned := r.methodUnpinned
+	r.mu.Unlock()
+	if unpinned {
+		return "auto"
+	}
+	return rc.CaptureMethod
+}
+
+// isNoFrameFailure recognises a capture that produced nothing at all.
+//
+// Matched on ffmpeg's wording rather than the exit code: -22 is generic. "before
+// EOF" means the input ended before the encoder could be configured, and "received
+// no packets" says the same thing from the muxer's side. Either way no frame ever
+// arrived, and no amount of changing encoder will help.
+func isNoFrameFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "received no packets") ||
+		strings.Contains(msg, "before eof")
+}
+
+// windowNativeAvailable asks whether the window-native grab COULD be used, ignoring
+// whether a saved setting currently forbids it.
+//
+// captureIsWindowNative answers a different question - may recording continue while
+// Siege is behind another window - and returns false the moment a method is pinned,
+// which is exactly the state this needs to see past.
+func windowNativeAvailable() bool {
+	caps, _, done := captureCaps()
+	if !done || caps == nil || !caps.HasGfxCapture {
+		return false
+	}
+	return siegeWindowHandle() != 0
 }
 
 // isEncoderOpenFailure recognises the one fault worth falling back for: the
@@ -509,6 +593,7 @@ func (r *recorder) tick() {
 	// same session. A field that is written and never read is not a fix, it is a
 	// log line that lies. Overriding rc here is what actually reaches ffmpeg.
 	rc.Encoder = r.effectiveEncoder(rc)
+	rc.CaptureMethod = r.effectiveMethod(rc)
 
 	// Budget enforcement runs whether or not we are capturing, so a buffer left
 	// behind by a crash still gets cleaned up.

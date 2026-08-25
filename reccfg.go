@@ -290,6 +290,27 @@ func (rc *recorderConfig) normalise() {
 		rc.Encoder = d.Encoder
 	}
 
+	// ONE-WAY REPAIR, 2026-08-25: a saved "ddagrab" is turned back into "auto".
+	//
+	// Nothing a player can click ever sets this. The only writer was the capture
+	// self-test, which runs with Siege closed, cannot try the window-native grab
+	// because there is no window to point at, and then saved its desktop-grab
+	// winner as though the player had chosen it. captureMode() reads an explicit
+	// ddagrab as a deliberate choice and stops offering gfxcapture, so every
+	// machine that ever ran the test lost window capture permanently - which is
+	// why recording died on alt-tab and produced no frames in a fullscreen game.
+	//
+	// "auto" is never a worse answer than this pin: with no window-native grab it
+	// resolves straight back to ddagrab. "gdigrab" is left alone, because that one
+	// really does carry a finding - it means ddagrab failed on this PC.
+	//
+	// ⚠ If a capture-method picker is ever added to the settings window, this has
+	// to become a one-shot keyed on a config flag, or it will quietly overrule the
+	// player every time they choose the GPU grab.
+	if rc.CaptureMethod == "ddagrab" {
+		rc.CaptureMethod = "auto"
+	}
+
 	if rc.CaptureBackend == "" {
 		rc.CaptureBackend = d.CaptureBackend
 	}

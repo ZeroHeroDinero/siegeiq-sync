@@ -410,13 +410,43 @@ func runOneProbe(path, dir string, seq int, c probeCandidate, rc recorderConfig,
 // So: if the test changed how frames are grabbed, the current capture is now
 // wrong by definition and gets stopped. The recorder's own loop starts a fresh
 // one within a few seconds using the settings that just won.
-func applyProbeWinner(c probeCandidate) error {
+func applyProbeWinner(c probeCandidate, caps *ffmpegCaps) error {
 	var cfg config
 	loadJSON(configPath(), &cfg)
 	cfg.Recorder.normalise()
 
 	was := cfg.Recorder
-	cfg.Recorder.CaptureMethod = c.Method
+
+	// ⚠ SAVING THE WINNING METHOD IS HOW THIS TEST BROKE IN-GAME RECORDING.
+	//
+	// The probe only ever tries ddagrab and gdigrab. It runs with Siege closed, so
+	// there is no window handle and the window-native path (gfxcapture) cannot be
+	// among the candidates. Writing the winner into CaptureMethod therefore pinned
+	// "ddagrab" - and captureMode() treats an explicit ddagrab or gdigrab as the
+	// player having chosen it, which permanently disables gfxcapture.
+	//
+	// That one line caused all of it, measured on this machine 2026-08-25:
+	//   * recording stopped whenever the player alt-tabbed, because only the
+	//     window-native path is allowed to keep filming when Siege is behind
+	//     another window
+	//   * capture produced NO FRAMES in game and ffmpeg died with "Could not open
+	//     encoder before EOF", which reads like an encoder fault and is not one
+	//   * the capture test appeared to fix it and then broke it again, every time,
+	//     because each run rewrote the pin
+	//
+	// So the method is only pinned when the pin carries information. If ddagrab won
+	// and this machine has a window-native grab, "auto" is strictly better: it uses
+	// gfxcapture in game and falls back to exactly the method that just won when
+	// there is no window to point at. A gdigrab win DOES carry information - it
+	// means ddagrab failed here - so that one is still saved.
+	if c.Method == "ddagrab" && caps != nil && caps.HasGfxCapture {
+		cfg.Recorder.CaptureMethod = "auto"
+		logf("recorder: the self-test picked GPU screen grab, but this PC also has the " +
+			"window-native grab, so the setting is left on automatic - that is what keeps " +
+			"recording through an alt-tab and what actually works in a fullscreen game")
+	} else {
+		cfg.Recorder.CaptureMethod = c.Method
+	}
 	cfg.Recorder.Adapter = c.Adapter
 	// Save whatever won, hardware or not. The old version only ever wrote "cpu"
 	// and left everything else on "auto", which meant a proven-good graphics

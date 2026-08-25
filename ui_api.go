@@ -705,7 +705,8 @@ func apiStartCaptureTest() string {
 			rep.Error = "None of the configurations produced any video on this PC."
 		default:
 			rep.Winner = winner.Label
-			if err := applyProbeWinner(*winner); err != nil {
+			_caps, _, _ := captureCaps()
+			if err := applyProbeWinner(*winner, _caps); err != nil {
 				rep.Error = err.Error()
 			} else {
 				rep.Applied = true
