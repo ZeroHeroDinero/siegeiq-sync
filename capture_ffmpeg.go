@@ -976,7 +976,19 @@ func (s *ffmpegSession) Stop() error {
 		if s.cmd != nil && s.cmd.Process != nil {
 			_ = s.cmd.Process.Kill()
 		}
-		<-s.done
+		// The wait AFTER the kill used to be unbounded, which made the 8 second
+		// guard above pointless: it protected the polite path and then handed
+		// straight over to a wait that could never time out. Killing a process
+		// does not always release a reader goroutine blocked on a pipe that a
+		// surviving child still holds open, and when that happened Stop() hung
+		// and took its caller with it. Give the kill a moment to land, then
+		// return regardless. A session we have already killed is not worth
+		// blocking the app for.
+		select {
+		case <-s.done:
+		case <-time.After(5 * time.Second):
+			logf("recorder: ffmpeg still had not exited after being killed - moving on")
+		}
 		return nil
 	}
 }

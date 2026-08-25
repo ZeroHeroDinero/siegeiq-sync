@@ -20,6 +20,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,9 +31,18 @@ import (
 // at a short clip can see why it is short.
 type trimResult struct {
 	Path     string
-	Duration time.Duration
+	Duration time.Duration // what was ASKED for
 	Gaps     []string
 	Bytes    int64
+
+	// Measured off the file that was actually produced, not copied from the
+	// capture config. Added 2026-08-25: a sidecar that describes what was
+	// intended rather than what exists is the same class of lie as writing 0
+	// for "not measured". Zero means the measurement failed, and the caller
+	// should fall back rather than publish a made-up number.
+	ActualDuration time.Duration
+	Width          int
+	Height         int
 }
 
 // trimSpan writes one keepSpan out of the buffer as a single mp4.
@@ -136,13 +147,80 @@ func trimSpan(rc recorderConfig, span keepSpan, outPath string) (*trimResult, er
 			"This usually means the moment had already rolled out of the buffer", err)
 	}
 
+	// The video-stream check above catches a container with no picture in it. It
+	// does NOT catch a clip that has video and is wildly shorter than the span
+	// that was asked for, which is the same buffer-miss failure landing one step
+	// further along. Measure what was produced and refuse anything that is a
+	// small fraction of the request.
+	actual, w, h, mErr := measureOutput(ff, outPath)
+	if mErr != nil {
+		// Measurement failing is not itself a reason to throw away a clip that
+		// already passed the video check. Ship it, leave the measured fields at
+		// zero, and let the sidecar fall back rather than invent numbers.
+		logf("recorder: could not measure the finished clip: %v", mErr)
+	} else if actual < time.Duration(float64(dur)*minKeptFraction) && actual < dur-2*time.Second {
+		_ = os.Remove(outPath)
+		return nil, fmt.Errorf("the clip came out %s long but %s was asked for. "+
+			"This usually means most of the moment had already rolled out of the buffer",
+			actual.Round(time.Second), dur.Round(time.Second))
+	}
+
 	return &trimResult{
-		Path:     outPath,
-		Duration: dur,
-		Gaps:     gaps,
-		Bytes:    info.Size(),
+		Path:           outPath,
+		Duration:       dur,
+		Gaps:           gaps,
+		Bytes:          info.Size(),
+		ActualDuration: actual,
+		Width:          w,
+		Height:         h,
 	}, nil
 }
+
+// minKeptFraction is how much of the requested span must actually survive into
+// the finished clip. Deliberately loose: a stream copy snaps to keyframes, so a
+// clip is routinely a second or two off in either direction, and a tight bound
+// would reject good clips. The failure this exists to catch was 0.68 seconds
+// against an 81 second request, so anything near half is comfortably enough.
+const minKeptFraction = 0.5
+
+// measureOutput reads the duration and frame size back off a finished file.
+//
+// Uses ffmpeg rather than ffprobe for the same reason verifyHasVideo does:
+// ffmpeg is already located and known to exist, ffprobe is not guaranteed to
+// ship beside it. `ffmpeg -i file` with no output prints the stream summary to
+// stderr and exits non-zero by design, so the error is expected and ignored;
+// only the parse matters.
+func measureOutput(ff, path string) (time.Duration, int, int, error) {
+	cmd := exec.Command(ff, "-hide_banner", "-nostdin", "-i", path)
+	hideConsole(cmd)
+	out, _ := cmd.CombinedOutput()
+	text := string(out)
+
+	var dur time.Duration
+	if m := durationRe.FindStringSubmatch(text); m != nil {
+		hh, _ := strconv.Atoi(m[1])
+		mm, _ := strconv.Atoi(m[2])
+		ss, _ := strconv.ParseFloat(m[3], 64)
+		dur = time.Duration(hh)*time.Hour + time.Duration(mm)*time.Minute +
+			time.Duration(ss*float64(time.Second))
+	}
+	var w, h int
+	if m := sizeRe.FindStringSubmatch(text); m != nil {
+		w, _ = strconv.Atoi(m[1])
+		h, _ = strconv.Atoi(m[2])
+	}
+	if dur == 0 && w == 0 {
+		return 0, 0, 0, fmt.Errorf("could not read duration or frame size back")
+	}
+	return dur, w, h, nil
+}
+
+var (
+	durationRe = regexp.MustCompile(`Duration:\s*(\d+):(\d\d):(\d\d(?:\.\d+)?)`)
+	// Matches the WxH in a video stream line. Anchored on "Video:" so an audio
+	// stream or a metadata field carrying two numbers cannot match by accident.
+	sizeRe = regexp.MustCompile(`Video:[^\n]*?\b(\d{2,5})x(\d{2,5})\b`)
+)
 
 // verifyHasVideo returns nil only if outPath contains a usable video stream.
 //

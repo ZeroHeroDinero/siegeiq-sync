@@ -35,7 +35,36 @@ const (
 	prunePeriod     = 60 * time.Second // how often the buffer budget is enforced
 	geometrySlack   = 8                // pixels of change tolerated before restarting
 	postMatchSettle = 3 * time.Second  // let the last segment flush before trimming
+
+	// deadSessionWait bounds how long tick() will wait to collect the exit
+	// error from a capture that has already stopped. See waitBounded.
+	deadSessionWait = 10 * time.Second
 )
+
+// waitBounded collects a finished session's exit error without ever blocking
+// the tick loop forever.
+//
+// WHY THIS EXISTS. tick() is the recorder's whole supervision loop: it is what
+// notices Siege closing, restarts a dead capture, prunes the buffer and updates
+// the status line. It used to call sess.Wait() directly, and Wait() blocks on a
+// channel with no timeout. An ffmpeg that is wedged rather than cleanly dead
+// therefore froze the entire loop, and it froze it at the one moment the loop
+// existed to be useful: immediately after a capture had already failed. The app
+// stayed on screen looking alive and did nothing at all.
+//
+// The goroutine can outlive this call if Wait() never returns. That is
+// deliberate and it is the cheap half of the trade: one parked goroutine costs
+// nothing, and stopCapture() kills the process behind it moments later.
+func waitBounded(sess captureSession, d time.Duration) error {
+	done := make(chan error, 1) // buffered, so a late send never blocks the goroutine
+	go func() { done <- sess.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(d):
+		return fmt.Errorf("capture did not report why it stopped within %s", d)
+	}
+}
 
 type recorder struct {
 	mu sync.Mutex
@@ -581,6 +610,30 @@ func (r *recorder) run() {
 	}
 }
 
+// applyMeasured overwrites a sidecar's descriptive fields with what the finished
+// file ACTUALLY contains, falling back to the capture config only where the
+// measurement failed.
+//
+// WHY. Until 2026-08-25 duration came from the requested span and the frame size
+// came from the capture crop, so a sidecar described what was intended rather
+// than what exists. Two unplayable clips shipped claiming 81 seconds at
+// 2400x1350 while the file on disk was 0.68 seconds of audio at nothing. A zero
+// from the measurement means it could not be read, and in that case the config
+// value is the honest best guess rather than a fabrication.
+func applyMeasured(meta *clipMeta, res *trimResult, fallbackW, fallbackH int) {
+	if res == nil {
+		return
+	}
+	if res.ActualDuration > 0 {
+		meta.DurationSec = res.ActualDuration.Seconds()
+	}
+	if res.Width > 0 && res.Height > 0 {
+		meta.Width, meta.Height = res.Width, res.Height
+		return
+	}
+	meta.Width, meta.Height = fallbackW, fallbackH
+}
+
 func (r *recorder) tick() {
 	rc := r.settings()
 
@@ -671,7 +724,7 @@ func (r *recorder) tick() {
 	sess := r.session
 	r.mu.Unlock()
 	if sess != nil && !sess.Running() {
-		err := sess.Wait()
+		err := waitBounded(sess, deadSessionWait)
 		if err != nil {
 			logf("recorder: capture stopped unexpectedly: %v", err)
 		}
@@ -920,8 +973,9 @@ func (r *recorder) handleMatch(matchFolder string, files []string, ev *matchEven
 				FPS:                 rc.FPS,
 			}
 			r.mu.Lock()
-			meta.Width, meta.Height = r.spec.Crop.W, r.spec.Crop.H
+			cropW, cropH := r.spec.Crop.W, r.spec.Crop.H
 			r.mu.Unlock()
+			applyMeasured(&meta, res, cropW, cropH)
 			if sessBackend := r.backendName(); sessBackend != "" {
 				meta.CaptureBackend = sessBackend
 			}
@@ -1017,7 +1071,7 @@ func (r *recorder) saveLast(d time.Duration) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	writeClipMeta(out, clipMeta{
+	manualMeta := clipMeta{
 		CreatedAt:           time.Now(),
 		MatchFolder:         "manual",
 		Label:               span.Label,
@@ -1030,7 +1084,12 @@ func (r *recorder) saveLast(d time.Duration) (string, error) {
 		Gaps:                res.Gaps,
 		FPS:                 rc.FPS,
 		CaptureBackend:      r.backendName(),
-	})
+	}
+	r.mu.Lock()
+	cropW, cropH := r.spec.Crop.W, r.spec.Crop.H
+	r.mu.Unlock()
+	applyMeasured(&manualMeta, res, cropW, cropH)
+	writeClipMeta(out, manualMeta)
 	logf("recorder: saved the last %s by hand -> %s", d, out)
 	return out, nil
 }
