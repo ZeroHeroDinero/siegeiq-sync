@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -91,6 +92,24 @@ type recorder struct {
 	// somebody turns notifications off to escape.
 	saidFullscreen bool
 
+	// encoderDemoted means the graphics card refused to OPEN its encoder and
+	// this session has fallen back to the processor.
+	//
+	// THIS EXISTS BECAUSE THE OLD BEHAVIOUR WAS TO GIVE UP ENTIRELY. h264_nvenc
+	// returning -22 "Could not open encoder" is not the same fault as a screen
+	// grab producing no frames, and it has a fix the app can apply by itself:
+	// encode on the processor instead. Counting it as one of three strikes
+	// meant a player whose graphics card was momentarily out of encode sessions
+	// - because clip compression was using them - ended up with a recorder that
+	// had stopped trying, and the only visible cure was the capture test, which
+	// merely cleared the strike count and never addressed the cause.
+	//
+	// Session-only on purpose. It is NOT written to the config, so quality is
+	// not silently downgraded forever by one transient refusal; configure()
+	// clears it, which covers a settings change, the capture self-test and a
+	// restart of the app.
+	encoderDemoted bool
+
 	// siegeWasRunning tracks the last tick's answer, so a fresh launch of the
 	// game can clear a give-up state. Somebody who quits Siege, changes their
 	// display mode and comes back should not have to find a button in this app
@@ -121,6 +140,9 @@ func (r *recorder) configure(cfg *config) {
 	r.rc = cfg.Recorder
 	r.rc.normalise()
 	cfg.Recorder = r.rc
+	// Any settings change, and the capture self-test, is a fresh reason to
+	// believe the hardware encoder might work. See encoderDemoted.
+	r.encoderDemoted = false
 }
 
 func (r *recorder) setStatusFn(fn func(string)) {
@@ -190,6 +212,22 @@ func (r *recorder) noteFailure(err error) {
 		return
 	}
 	r.captureStarted = time.Time{}
+
+	// The graphics card refused to open its encoder. Fall back to the processor
+	// for this session rather than spending a strike on a fault we can fix.
+	if !r.encoderDemoted && r.rc.Encoder != "cpu" && isEncoderOpenFailure(err) {
+		r.encoderDemoted = true
+		r.failures = 0
+		r.nextTry = time.Now().Add(2 * time.Second)
+		if err != nil {
+			r.lastError = err.Error()
+		}
+		r.mu.Unlock()
+		logf("recorder: the graphics card would not start encoding, so this session falls back to the processor. Original error: %v", err)
+		r.setStatus("Recording on the processor - the graphics card refused to encode")
+		return
+	}
+
 	r.failures++
 	if err != nil {
 		r.lastError = err.Error()
@@ -223,6 +261,39 @@ func (r *recorder) clearFailures() {
 	r.nextTry = time.Time{}
 	r.captureStarted = time.Time{}
 	r.mu.Unlock()
+}
+
+// effectiveEncoder is the encoder the NEXT capture should actually use, which
+// is the configured one unless this session has already been refused by the
+// graphics card. The setting on disk is left alone.
+func (r *recorder) effectiveEncoder(rc recorderConfig) string {
+	r.mu.Lock()
+	demoted := r.encoderDemoted
+	r.mu.Unlock()
+	if demoted {
+		return "cpu"
+	}
+	return rc.Encoder
+}
+
+// isEncoderOpenFailure recognises the one fault worth falling back for: the
+// hardware encoder would not START. Matched on ffmpeg's own wording rather than
+// on the exit code, because -22 (invalid argument) is generic and is returned
+// for plenty of faults that a processor fallback would not fix.
+func isEncoderOpenFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "could not open encoder") ||
+		strings.Contains(msg, "cannot load nvcuda") ||
+		strings.Contains(msg, "openencodesessionex failed") ||
+		strings.Contains(msg, "no capable devices found") {
+		return true
+	}
+	// The encoder named itself in the failing task line.
+	return strings.Contains(msg, "error initializing output stream") &&
+		(strings.Contains(msg, "nvenc") || strings.Contains(msg, "amf") || strings.Contains(msg, "qsv"))
 }
 
 // captureTrouble reports whether the recorder has stopped trying, and why.
@@ -567,7 +638,7 @@ func (r *recorder) tick() {
 		WindowHandle: siegeWindowHandle(),
 		FPS:          rc.FPS,
 		HeightCap:    rc.HeightCap,
-		Encoder:      rc.Encoder,
+		Encoder:      r.effectiveEncoder(rc),
 		Quality:      rc.Quality,
 		SegmentDir:   rc.bufferDir(),
 		SegmentSecs:  10,

@@ -115,7 +115,12 @@ func compressForUpload(rc recorderConfig, clipPath string) (string, func()) {
 
 	args := []string{"-hide_banner", "-loglevel", "error", "-y", "-i", clipPath,
 		"-vf", fmt.Sprintf("scale=-2:%d:flags=bicubic,fps=%d", compressHeight, compressFPS)}
-	args = append(args, compressEncoder(caps)...)
+	// Never take a hardware encode session while a recording is live. A
+	// consumer graphics card has a small, fixed number of them, and shrinking a
+	// clip for upload happens at exactly the worst moment - the match just
+	// ended, the buffer is restarting. Losing a few megabytes on one upload is
+	// nothing; losing the recording is the product not working.
+	args = append(args, compressEncoder(caps, rec.capturing())...)
 	args = append(args,
 		"-c:a", "aac", "-b:a", "96k", "-ac", "2",
 		// faststart moves the index to the front so the file can be played
@@ -168,10 +173,15 @@ func compressForUpload(rc recorderConfig, clipPath string) (string, func()) {
 // hardware encoder, at "veryfast" rather than "slow", because on those machines
 // the CPU is the only thing available and taking five minutes of it is exactly
 // the outcome being avoided.
-func compressEncoder(caps *ffmpegCaps) []string {
+func compressEncoder(caps *ffmpegCaps, avoidHardware bool) []string {
 	b := itoa(compressKbps) + "k"
 	m := itoa(compressMaxKbps) + "k"
 	buf := itoa(compressMaxKbps*2) + "k"
+	if avoidHardware {
+		logf("recorder: shrinking this clip on the processor - a recording is live and the graphics card encoder is needed for it")
+		return []string{"-c:v", "libx264", "-preset", "veryfast",
+			"-b:v", b, "-maxrate", m, "-bufsize", buf, "-pix_fmt", "yuv420p"}
+	}
 	switch {
 	case caps.HasNVENC:
 		return []string{"-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",

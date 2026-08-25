@@ -59,6 +59,20 @@ type probeResult struct {
 // minute.
 const probeSeconds = 2
 
+// probeFPS is the frame rate each attempt runs at: the player's own, so the
+// encoder is asked for exactly what the recorder will ask for. Clamped only to
+// keep a nonsense config from producing a nonsense test.
+func probeFPS(rc recorderConfig) int {
+	f := rc.FPS
+	if f < 10 {
+		f = 30
+	}
+	if f > 240 {
+		f = 240
+	}
+	return f
+}
+
 // probeCandidates is stage one: WHICH SCREEN GRAB DELIVERS FRAMES.
 //
 // Every entry here encodes on the processor, and that is the whole point. The
@@ -101,9 +115,18 @@ func encoderCandidates(caps *ffmpegCaps) []struct{ encoder, label string } {
 
 // probeArgs builds a short, single-file recording rather than the segmented
 // rolling buffer. Deliberately minimal: no keyframe forcing, no segmenting, no
-// cropping. This test answers exactly one question - do frames arrive - and
-// every extra option is another thing that could fail for an unrelated reason
-// and send the diagnosis sideways.
+// cropping. Every extra option is another thing that could fail for an
+// unrelated reason and send the diagnosis sideways.
+//
+// IT ENCODES AT THE PLAYER'S REAL HEIGHT AND FRAME RATE, AND THAT IS THE POINT.
+// The first version scaled every attempt to 480p at 30fps. On a machine
+// recording 2400x1350 at 60, h264_nvenc opened happily at 480p and then refused
+// -22 "Could not open encoder" on the real thing, so the test passed, the
+// recorder failed three times and stopped, and the only apparent cure was
+// running the test again - which fixed nothing and merely cleared the strike
+// count. A check that does not exercise what the recorder actually does is not
+// a check. Same lesson as the installer size threshold: ask the tool, at the
+// real settings, or do not ask at all.
 func probeArgs(c probeCandidate, rc recorderConfig, caps *ffmpegCaps, out string) []string {
 	args := []string{"-hide_banner", "-loglevel", "error"}
 
@@ -114,13 +137,16 @@ func probeArgs(c probeCandidate, rc recorderConfig, caps *ffmpegCaps, out string
 			dev = fmt.Sprintf("d3d11va=dda:%d", c.Adapter)
 		}
 		args = append(args, "-init_hw_device", dev, "-filter_hw_device", "dda")
-		filters = append(filters, "ddagrab=output_idx=0:framerate=30", "hwdownload", "format=bgra")
+		filters = append(filters, fmt.Sprintf("ddagrab=output_idx=0:framerate=%d", probeFPS(rc)), "hwdownload", "format=bgra")
 	} else {
 		// "desktop" rather than a window title, because Siege is usually closed
 		// while somebody is sitting in the settings screen running this test.
-		args = append(args, "-f", "gdigrab", "-framerate", "30", "-i", "desktop")
+		args = append(args, "-f", "gdigrab", "-framerate", itoa(probeFPS(rc)), "-i", "desktop")
 	}
-	filters = append(filters, "scale=-2:480", "format=yuv420p")
+	if rc.HeightCap > 0 {
+		filters = append(filters, fmt.Sprintf("scale=-2:%d:flags=bicubic", rc.HeightCap))
+	}
+	filters = append(filters, "format=yuv420p")
 
 	if c.Method == "ddagrab" {
 		args = append(args, "-filter_complex", strings.Join(filters, ",")+"[v]", "-map", "[v]")
