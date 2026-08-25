@@ -43,8 +43,12 @@ const (
 	KeepMyKills     = "my_kills"     // needs events: rounds where the uploader got a kill
 	KeepClutches    = "clutches"     // needs events: rounds the uploader ended as last alive
 	KeepKillMoments = "kill_moments" // needs events: a window around each of your kills
-	KeepLastSeconds = "last_seconds" // the final N seconds of each round
-	KeepNothing     = "nothing"      // buffer only; the player saves moments by hand
+	// Added 2026-08-25. All three cut to a MOMENT rather than to a round.
+	KeepDeathMoments = "death_moments" // needs events: a window around each of your deaths
+	KeepPostPlant    = "post_plant"    // needs events: from the plant to the end of the round
+	KeepOpeningDuel  = "opening_duel"  // needs events: the round's first kill, when you were in it
+	KeepLastSeconds  = "last_seconds"  // the final N seconds of each round
+	KeepNothing      = "nothing"       // buffer only; the player saves moments by hand
 )
 
 // Destination for a finished clip beyond the local folder.
@@ -268,7 +272,8 @@ func (rc *recorderConfig) normalise() {
 
 	switch rc.KeepRule {
 	case KeepWholeMatch, KeepActionOnly, KeepMyDeaths, KeepMyKills,
-		KeepClutches, KeepKillMoments, KeepLastSeconds, KeepNothing:
+		KeepClutches, KeepKillMoments, KeepDeathMoments, KeepPostPlant,
+		KeepOpeningDuel, KeepLastSeconds, KeepNothing:
 	default:
 		rc.KeepRule = d.KeepRule
 	}
@@ -348,7 +353,8 @@ func (rc *recorderConfig) normalise() {
 // to explain a degrade honestly in the log.
 func (rc recorderConfig) needsEvents() bool {
 	switch rc.KeepRule {
-	case KeepMyDeaths, KeepMyKills, KeepClutches, KeepKillMoments:
+	case KeepMyDeaths, KeepMyKills, KeepClutches, KeepKillMoments,
+		KeepDeathMoments, KeepPostPlant, KeepOpeningDuel:
 		return true
 	}
 	return false

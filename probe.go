@@ -279,28 +279,48 @@ func runCaptureProbe(rc recorderConfig) ([]probeResult, *probeCandidate, error) 
 		}
 	}
 
-	// ---- sound: what does this PC even have? ------------------------------
+	// ---- sound: DOES THE PATH THAT ACTUALLY RECORDS IT WORK? --------------
 	//
-	// Reported rather than acted on. Recording game audio depends on a device
-	// that many machines do not expose, and the only useful thing to do about
-	// that is say so with the device names in front of the player, instead of
-	// leaving a settings toggle that silently records silence.
-	if devs, err := listAudioDevices(rc); err == nil {
-		can, name, msg := audioVerdict(devs)
+	// IT NOW TESTS THE RECORDER'S OWN CAPTURE, NOT A DEVICE LIST.
+	//
+	// Until 2026-08-25 this row asked Windows for dshow INPUT devices and
+	// reported that the machine had none carrying game sound. That is true of
+	// nearly every PC and has nothing to do with how Sync records: it takes the
+	// sound straight off the playback device in loopback. So the row sat in a
+	// column of green "works" ticks, on a machine whose sound was demonstrably
+	// fine, saying something that reads as a failure. The message even ended
+	// with "and none is needed", which nobody reaches after the first half has
+	// already told them something is wrong.
+	//
+	// Starting the real loopback and stopping it again is one second of work and
+	// it is the only answer worth printing. Same principle as asking the
+	// compiler whether the recorder is in the installer instead of guessing from
+	// the file size, and as reporting the running capture rather than the
+	// setting: measure the thing, do not describe your intentions about it.
+	if lb, err := startLoopback(); err == nil {
+		msg := fmt.Sprintf("Game sound is being recorded straight from Windows, %d Hz, %d channel(s). No microphone or input device is involved.",
+			lb.Format.SampleRate, lb.Format.Channels)
+		lb.Stop()
 		logf("capture test: sound - %s", msg)
 		results = append(results, probeResult{
-			Label:   "Sound",
-			Encoder: "audio",
-			Adapter: -1,
-			OK:      can,
-			Detail:  msg,
+			Label: "Sound", Encoder: "audio", Adapter: -1, OK: true, Detail: msg,
 		})
+	} else {
+		msg := "Game sound could not be recorded on this PC: " + err.Error()
+		logf("capture test: sound - %s", msg)
+		results = append(results, probeResult{
+			Label: "Sound", Encoder: "audio", Adapter: -1, OK: false, Detail: msg,
+		})
+	}
+
+	// The input devices stay listed BELOW the verdict, and only as information.
+	// They are not what records the game, so none of them gets an OK or a cross -
+	// a row with no verdict beside a row that has one is how a reader tells
+	// "this is context" from "this is the answer".
+	if devs, err := listAudioDevices(rc); err == nil {
 		for _, d := range devs {
-			if d.Name == name {
-				continue
-			}
 			results = append(results, probeResult{
-				Label:   "Audio input: " + d.Name,
+				Label:   "Also on this PC: " + d.Name,
 				Encoder: "audio",
 				Adapter: -1,
 				Detail:  d.Why,

@@ -70,6 +70,25 @@ type roundEvent struct {
 	// round clock without guessing, which is why the rule below degrades on an
 	// empty slice instead of quietly keeping nothing.
 	KillTimes []float64 `json:"kill_times_before_end_sec,omitempty"`
+	// The same, for each death the uploader took. Added 2026-08-25.
+	DeathTimes []float64 `json:"death_times_before_end_sec,omitempty"`
+	// When the defuser was planted, seconds before the round ended. Zero means no
+	// plant was decoded, which is NOT the same as no plant: a round the backend
+	// could not place on the clock also arrives as zero, and the post-plant rule
+	// degrades rather than inventing a boundary.
+	PlantBeforeEnd float64 `json:"plant_before_end_sec,omitempty"`
+	PlantedBy      string  `json:"planted_by,omitempty"`
+	UploaderPlant  bool    `json:"uploader_planted,omitempty"`
+	// When the defuser was disabled. NO DEFUSE EVENT HAS EVER BEEN SEEN on this
+	// fork of the parser, so this is expected to stay zero until one is. It costs
+	// nothing to read and must not be described to a player as working.
+	DefuseBeforeEnd float64 `json:"defuse_before_end_sec,omitempty"`
+	DefusedBy       string  `json:"defused_by,omitempty"`
+	UploaderDefuse  bool    `json:"uploader_defused,omitempty"`
+	// The round's FIRST kill, and whether the uploader was in it. Role is "killer",
+	// "victim", or empty when they were not involved.
+	OpeningBeforeEnd float64 `json:"opening_before_end_sec,omitempty"`
+	OpeningRole      string  `json:"uploader_opening_role,omitempty"`
 	// Exact boundaries, seconds relative to the round's end. Zero means unknown.
 	StartBeforeEndSec  float64 `json:"start_before_end_sec"`
 	ActionBeforeEndSec float64 `json:"action_before_end_sec"`

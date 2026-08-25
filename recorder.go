@@ -500,6 +500,16 @@ func (r *recorder) run() {
 func (r *recorder) tick() {
 	rc := r.settings()
 
+	// THE DEMOTION HAS TO LAND ON rc, NOT ON THE SPEC.
+	//
+	// It was applied to captureSpec.Encoder first, and that field is read by
+	// NOTHING: the ffmpeg command line comes from encoderArgs(caps, rc). So the
+	// fallback logged that it had switched to the processor and then launched
+	// h264_nvenc anyway - measured live on 2026-08-25 at 23:46 and 23:50 in the
+	// same session. A field that is written and never read is not a fix, it is a
+	// log line that lies. Overriding rc here is what actually reaches ffmpeg.
+	rc.Encoder = r.effectiveEncoder(rc)
+
 	// Budget enforcement runs whether or not we are capturing, so a buffer left
 	// behind by a crash still gets cleaned up.
 	if time.Since(r.lastPrune) > prunePeriod {
@@ -638,7 +648,7 @@ func (r *recorder) tick() {
 		WindowHandle: siegeWindowHandle(),
 		FPS:          rc.FPS,
 		HeightCap:    rc.HeightCap,
-		Encoder:      r.effectiveEncoder(rc),
+		Encoder:      rc.Encoder,
 		Quality:      rc.Quality,
 		SegmentDir:   rc.bufferDir(),
 		SegmentSecs:  10,

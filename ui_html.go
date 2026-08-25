@@ -682,6 +682,12 @@ var RULES=[
  // It needs the kill times the upload reply now carries; a round the backend could
  // not place a kill on the clock keeps its action phase and says so on the clip.
  ["kill_moments","Just the moment of each kill","A few seconds either side of every kill, instead of the whole round.","needs syncing on"],
+ // Added 2026-08-25. Deaths are the coaching one: the seconds before a death hold
+ // the whole mistake, and a boolean "you died" holds none of it. The post-plant and
+ // the opening duel are the two moments that decide most rounds.
+ ["death_moments","Just the moment of each death","A few seconds either side of every death. The best clips to actually learn from.","needs syncing on"],
+ ["post_plant","Only the post-plant","From the defuser going down to the end of the round.","needs syncing on"],
+ ["opening_duel","Only the opening duel","The first kill of each round, when you were the one who got it or took it.","needs syncing on"],
  ["nothing","Nothing automatically","Buffer only. You save moments by hand.",""]
 ];
 
@@ -1777,8 +1783,8 @@ function paintFields(){
    +num("clip_disk_mb","Clips limit (MB)",settings.clip_disk_mb,"Oldest clips are removed once this is passed.")
    +num("clip_keep_days","Keep clips for (days)",settings.clip_keep_days,"Clips older than this are removed.")
    +num("last_seconds","Last seconds per round",settings.last_seconds,"Used by the last-seconds keep rule.")
-   +num("kill_lead_sec","Before each kill (seconds)",settings.kill_lead_sec,"Used by the kill-moment rule. A Siege kill is decided by the couple of seconds before it.")
-   +num("kill_trail_sec","After each kill (seconds)",settings.kill_trail_sec,"Used by the kill-moment rule. Enough to see the outcome.")
+   +num("kill_lead_sec","Before each moment (seconds)",settings.kill_lead_sec,"Used by the kill, death and opening-duel rules. A Siege fight is decided by the couple of seconds before it.")
+   +num("kill_trail_sec","After each moment (seconds)",settings.kill_trail_sec,"Used by the kill, death and opening-duel rules. Enough to see the outcome.")
    +num("pre_pad_sec","Extra before (seconds)",settings.pre_pad_sec,"Padding at the front, to absorb boundary error.")
    +num("post_pad_sec","Extra after (seconds)",settings.post_pad_sec,"Padding at the end of each clip.")
    +selLabelled("send_to_ai","Send clips to AI Analyze",settings.send_to_ai,

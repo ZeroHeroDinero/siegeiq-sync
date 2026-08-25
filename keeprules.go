@@ -154,27 +154,13 @@ func evaluateKeepRule(plan matchPlan, rc recorderConfig) (spans []keepSpan, note
 				}
 				continue
 			}
-			// One span per kill, merged when two kills land close enough that the
-			// windows overlap. Two clips three seconds apart is worse than one.
-			type win struct{ from, to time.Time }
-			var wins []win
-			for _, t := range e.KillTimes {
-				at := r.End.Add(-time.Duration(t * float64(time.Second)))
-				w := win{at.Add(-lead), at.Add(trail)}
-				if n := len(wins); n > 0 && !w.from.After(wins[n-1].to) {
-					if w.to.After(wins[n-1].to) {
-						wins[n-1].to = w.to
-					}
-					continue
-				}
-				wins = append(wins, w)
-			}
+			wins := momentWindows(r.End, e.KillTimes, lead, trail)
 			for i, w := range wins {
 				label := fmt.Sprintf("r%02d-kill%d", r.Index, i+1)
 				if len(wins) == 1 {
 					label = fmt.Sprintf("r%02d-kill", r.Index)
 				}
-				add(label, r.Index, w.from, w.to, r.Exact, "the moment of a kill")
+				add(label, r.Index, w[0], w[1], r.Exact, "the moment of a kill")
 			}
 			kept++
 		}
@@ -184,6 +170,124 @@ func evaluateKeepRule(plan matchPlan, rc recorderConfig) (spans []keepSpan, note
 		}
 		if kept == 0 && degraded == 0 {
 			notes = append(notes, "no kills in this match, so nothing was kept")
+		}
+		return spans, notes
+
+	case KeepDeathMoments:
+		// CUT TO THE DEATH. The mirror of the rule above, and the one that makes
+		// coaching specific: "you died this round" is a boolean, but the five
+		// seconds before a death contain the whole mistake - where you were
+		// standing, what you were looking at, who was already dead.
+		//
+		// Same degrade contract as kills. A round the backend could not place a
+		// death on the clock keeps its action phase and says so, rather than
+		// quietly keeping nothing.
+		kept := 0
+		lead := time.Duration(rc.KillLeadSec) * time.Second
+		trail := time.Duration(rc.KillTrailSec) * time.Second
+		degraded := 0
+		for _, r := range plan.Rounds {
+			e, ok := plan.eventForRound(r)
+			if !ok {
+				continue
+			}
+			if len(e.DeathTimes) == 0 {
+				if e.UploaderDied {
+					degraded++
+					add(fmt.Sprintf("r%02d-death", r.Index), r.Index,
+						r.ActionStart, r.End, r.Exact,
+						"you died this round, exact time not decoded")
+				}
+				continue
+			}
+			wins := momentWindows(r.End, e.DeathTimes, lead, trail)
+			for i, w := range wins {
+				label := fmt.Sprintf("r%02d-death%d", r.Index, i+1)
+				if len(wins) == 1 {
+					label = fmt.Sprintf("r%02d-death", r.Index)
+				}
+				add(label, r.Index, w[0], w[1], r.Exact, "the moment of a death")
+			}
+			kept++
+		}
+		if degraded > 0 {
+			notes = append(notes, fmt.Sprintf(
+				"%d round(s) had a death but no decoded time, so the whole action phase was kept for those", degraded))
+		}
+		if kept == 0 && degraded == 0 {
+			notes = append(notes, "no deaths in this match, so nothing was kept")
+		}
+		return spans, notes
+
+	case KeepPostPlant:
+		// FROM THE PLANT TO THE END OF THE ROUND.
+		//
+		// Rounds with no plant are SKIPPED, not degraded - a round that never
+		// reached a plant genuinely has no post-plant, and keeping its action
+		// phase instead would quietly turn this rule back into "action only".
+		//
+		// A short lead is included so the clip opens on the plant going down
+		// rather than on the animation already finished.
+		kept, noPlant := 0, 0
+		lead := time.Duration(rc.KillLeadSec) * time.Second
+		for _, r := range plan.Rounds {
+			e, ok := plan.eventForRound(r)
+			if !ok {
+				continue
+			}
+			if e.PlantBeforeEnd <= 0 {
+				noPlant++
+				continue
+			}
+			at := r.End.Add(-time.Duration(e.PlantBeforeEnd * float64(time.Second)))
+			from := at.Add(-lead)
+			if from.Before(r.ActionStart) {
+				from = r.ActionStart
+			}
+			reason := "the post-plant"
+			if e.UploaderPlant {
+				reason = "the post-plant, you planted"
+			}
+			add(fmt.Sprintf("r%02d-postplant", r.Index), r.Index, from, r.End, r.Exact, reason)
+			kept++
+		}
+		if kept == 0 {
+			notes = append(notes, fmt.Sprintf(
+				"no plant was decoded in any of the %d round(s), so nothing was kept", noPlant))
+		}
+		return spans, notes
+
+	case KeepOpeningDuel:
+		// THE FIRST KILL OF THE ROUND, and only when you were in it.
+		//
+		// The opening duel decides more rounds than any other single moment, and
+		// losing it repeatedly is invisible on a scoreboard that only reports a
+		// total. Rounds where somebody else took the first kill are skipped, not
+		// degraded, for the same reason as the post-plant above.
+		kept, notYours := 0, 0
+		lead := time.Duration(rc.KillLeadSec) * time.Second
+		trail := time.Duration(rc.KillTrailSec) * time.Second
+		for _, r := range plan.Rounds {
+			e, ok := plan.eventForRound(r)
+			if !ok {
+				continue
+			}
+			if e.OpeningBeforeEnd <= 0 || e.OpeningRole == "" {
+				notYours++
+				continue
+			}
+			at := r.End.Add(-time.Duration(e.OpeningBeforeEnd * float64(time.Second)))
+			reason := "you took the opening kill"
+			if e.OpeningRole == "victim" {
+				reason = "you lost the opening duel"
+			}
+			add(fmt.Sprintf("r%02d-opening", r.Index), r.Index,
+				at.Add(-lead), at.Add(trail), r.Exact, reason)
+			kept++
+		}
+		if kept == 0 {
+			notes = append(notes, fmt.Sprintf(
+				"you were not in the opening duel of any of the %d round(s), so nothing was kept", notYours))
 		}
 		return spans, notes
 
@@ -222,12 +326,39 @@ func evaluateKeepRule(plan matchPlan, rc recorderConfig) (spans []keepSpan, note
 
 func shortRule(rule string) string {
 	switch rule {
-	case KeepMyDeaths:
+	case KeepMyDeaths, KeepDeathMoments:
 		return "death"
 	case KeepMyKills:
 		return "kills"
 	case KeepClutches:
 		return "clutch"
+	case KeepPostPlant:
+		return "postplant"
+	case KeepOpeningDuel:
+		return "opening"
 	}
 	return "clip"
+}
+
+// momentWindows turns "seconds before the round ended" into clip windows on the
+// wall clock, merging any two that overlap.
+//
+// ONE DERIVATION, shared by every moment rule. Two kills three seconds apart
+// must produce one clip rather than two overlapping ones, and a second copy of
+// that merge written for deaths is a second place for it to be wrong. The input
+// is assumed sorted earliest-first, which is what the backend sends.
+func momentWindows(end time.Time, times []float64, lead, trail time.Duration) [][2]time.Time {
+	var wins [][2]time.Time
+	for _, t := range times {
+		at := end.Add(-time.Duration(t * float64(time.Second)))
+		from, to := at.Add(-lead), at.Add(trail)
+		if n := len(wins); n > 0 && !from.After(wins[n-1][1]) {
+			if to.After(wins[n-1][1]) {
+				wins[n-1][1] = to
+			}
+			continue
+		}
+		wins = append(wins, [2]time.Time{from, to})
+	}
+	return wins
 }
