@@ -39,7 +39,30 @@ if defined LIVEVER (
   if "!LIVEVER!"=="?" (
     echo   Live version: could not check ^(offline?^). Continuing.
   ) else if "!LIVEVER!"=="%VER%" (
-    echo   Live version: v!LIVEVER! - already published. This will re-release it.
+    REM ---- HARD STOP. Added 2026-08-25, and it is here because of a real cost.
+    REM
+    REM      This was a warning that printed and carried on. On 2026-08-25 the
+    REM      script was run with three recorder fixes compiled in and the version
+    REM      left at 1.6.5. It built, it bundled ffmpeg, it printed "already
+    REM      published, this will re-release it", and then it tried to create a
+    REM      tag that already existed. The whole run read as clean, the live
+    REM      version never moved, and the fixes stayed on one machine.
+    REM
+    REM      Re-releasing an existing tag can NEVER move siegeiq.gg, because
+    REM      /sync/latest reads the NEWEST release. There is no case where
+    REM      carrying on here is right, so it stops instead of warning.
+    echo.
+    echo   STOPPED. v%VER% is ALREADY the live version.
+    echo.
+    echo   Re-releasing the same tag cannot move siegeiq.gg. The /sync page reads
+    echo   the newest GitHub release, and that is already v!LIVEVER!.
+    echo.
+    echo   To ship what you just built, raise the version FIRST, in BOTH files:
+    echo     1. config.go                  ^-^-^>  const version = "..."
+    echo     2. installer\siegeiq-sync.iss ^-^-^>  #define MyAppVersion "..."
+    echo   They must say the SAME new number. Then run this script again.
+    echo.
+    exit /b 1
   ) else (
     echo   Live version: v!LIVEVER!   ^->   publishing v%VER%
   )
