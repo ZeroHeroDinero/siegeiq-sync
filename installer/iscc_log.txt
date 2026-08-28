@@ -91,5 +91,5 @@ Creating setup files
    Updating manifest (Setup.exe)
 
 
-Successful compile (28.969 sec). Resulting Setup program filename is:
+Successful compile (20.985 sec). Resulting Setup program filename is:
 C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\installer\dist\SiegeIQSync-Setup.exe

@@ -138,65 +138,6 @@ func bufferSpan(dir string) (from, to time.Time, ok bool) {
 	return segs[0].Start, segs[len(segs)-1].End, true
 }
 
-// finalised reports whether a segment file has had its moov atom written.
-//
-// ffmpeg writes moov when it CLOSES a segment. A file without one is either the
-// segment currently being recorded into, or one that was orphaned when the
-// recorder died mid-write. The concat demuxer refuses the ENTIRE list when one
-// member is like that, so a single orphaned file from a crash three days ago
-// silently took out every clip that happened to span it - the player just saw
-// "trim failed ... moov atom not found" and got nothing. Skipping the file and
-// reporting it as a gap costs at most the ten seconds that segment holds.
-// Added 2026-08-28 after exactly that failure.
-//
-// This walks the top-level box headers rather than reading the file, so it costs
-// a few seeks no matter how large the segment is.
-func finalised(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || info.Size() < 16 {
-		return false
-	}
-	size := info.Size()
-	hdr := make([]byte, 16)
-	var off int64
-	for i := 0; i < 256 && off+8 <= size; i++ {
-		if _, err := f.ReadAt(hdr[:8], off); err != nil {
-			return false
-		}
-		box := int64(uint32(hdr[0])<<24 | uint32(hdr[1])<<16 | uint32(hdr[2])<<8 | uint32(hdr[3]))
-		if string(hdr[4:8]) == "moov" {
-			return true
-		}
-		hdrLen := int64(8)
-		switch {
-		case box == 1:
-			// A size of 1 means the real 64-bit size follows the type.
-			if _, err := f.ReadAt(hdr[8:16], off+8); err != nil {
-				return false
-			}
-			var big uint64
-			for _, b := range hdr[8:16] {
-				big = big<<8 | uint64(b)
-			}
-			box = int64(big)
-			hdrLen = 16
-		case box == 0:
-			// Runs to the end of the file, so nothing can follow it.
-			return false
-		}
-		if box < hdrLen {
-			return false
-		}
-		off += box
-	}
-	return false
-}
-
 // segmentsCovering returns the segments needed to reconstruct footage between
 // two instants, in order. A gap in coverage is reported rather than silently
 // stitched, because a clip that jumps two minutes without saying so is a clip
@@ -211,28 +152,15 @@ func segmentsCovering(dir string, from, to time.Time) (segs []segment, gaps []st
 	}
 
 	var picked []segment
-	var unfinished []string
 	for _, s := range all {
 		if s.End.After(from) && s.Start.Before(to) {
-			// One unfinalised file used to take out the whole clip. See finalised().
-			if !finalised(s.Path) {
-				unfinished = append(unfinished, s.Start.Format("15:04:05"))
-				continue
-			}
 			picked = append(picked, s)
 		}
 	}
 	if len(picked) == 0 {
-		if len(unfinished) > 0 {
-			return nil, nil, fmt.Errorf("the footage covering %s - %s was never finished being written (%s)",
-				from.Format("15:04:05"), to.Format("15:04:05"), strings.Join(unfinished, ", "))
-		}
 		return nil, nil, fmt.Errorf("no footage covering %s - %s (buffer holds %s - %s)",
 			from.Format("15:04:05"), to.Format("15:04:05"),
 			all[0].Start.Format("15:04:05"), all[len(all)-1].End.Format("15:04:05"))
-	}
-	for _, u := range unfinished {
-		gaps = append(gaps, "unfinished segment at "+u)
 	}
 
 	// Allow a second of slop: segment boundaries are not perfectly abutting.
