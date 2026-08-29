@@ -29,6 +29,11 @@ type clipMeta struct {
 	AppVersion    string    `json:"app_version"`
 
 	MatchFolder string    `json:"match_folder"`
+	// MatchID is the BACKEND's id for the match, not a local one, which is what
+	// makes it useful: it joins this clip to the .rec files Sync already uploaded
+	// and the server already parsed. Empty for a clip cut before this field
+	// existed, and for anything saved by hand outside a match.
+	MatchID     string    `json:"match_id,omitempty"`
 	RoundIndex  int       `json:"round_index"`
 	Label       string    `json:"label"`
 	Reason      string    `json:"reason"`

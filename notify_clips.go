@@ -24,6 +24,28 @@ func notifyClipsSaved(n int, dir string) {
 		true)
 }
 
+// notifyReviewReady is the one notification that is worth interrupting for.
+//
+// Everything else this file sends is housekeeping - a clip was saved, an upload
+// went through - and those tell the player about work the app did for itself.
+// This one tells them there is something waiting to be READ, which is the whole
+// reason they installed a recorder rather than a folder watcher. It fires once,
+// after a match, when the analysis they never had to ask for has finished.
+//
+// Silent on purpose. A sound during a match is unforgivable and a review lands
+// while the next round is very likely already running, so this shows and waits.
+func notifyReviewReady(label string, score int) {
+	what := "Your round"
+	if label != "" {
+		what = "Your " + label
+	}
+	detail := "has been analysed. Open SiegeIQ Sync to read it."
+	if score > 0 {
+		detail = fmt.Sprintf("scored %d. Open SiegeIQ Sync to see what to fix.", score)
+	}
+	balloon("Your review is ready", what+" "+detail, true)
+}
+
 // notifyClipFailed reports a cut that did not work. Silent since 2026-08-22:
 // a saved clip is the only thing that makes a noise, so a beep can only ever mean
 // one thing. A failure shows the message and nothing else.

@@ -51,6 +51,13 @@ type resultsMatch struct {
 	ClipPath     string `json:"clip_path"`
 	ClipUploaded bool   `json:"clip_uploaded"`
 	ClipStatus   string `json:"clip_status"`
+
+	// The review the server ran off the back of that clip, added 2026-08-29.
+	// ReviewState is the server's own word - queued, running, complete, failed,
+	// skipped - and empty means no review was ever started, which is what every
+	// clip sent before this existed will say forever.
+	ReviewState string `json:"review_state"`
+	ReviewID    string `json:"review_id"`
 }
 
 type resultsSnapshot struct {
@@ -201,6 +208,8 @@ func fetchResults() {
 	// cannot be attached to a match yet, which is honest rather than clever: the
 	// association genuinely does not exist until something records it.
 	uploaded := map[string]string{}   // match id -> upload status
+	reviewState := map[string]string{} // match id -> review state
+	reviewID := map[string]string{}    // match id -> review id
 	folderToMatch := map[string]string{}
 	if raw, err := deviceGet(cfg, "/sync/clips"); err == nil {
 		var cl struct {
@@ -208,6 +217,8 @@ func fetchResults() {
 				MatchID     string `json:"match_id"`
 				MatchFolder string `json:"match_folder"`
 				Status      string `json:"status"`
+				ReviewState string `json:"review_state"`
+				ReviewID    string `json:"review_id"`
 			} `json:"clips"`
 		}
 		if json.Unmarshal(raw, &cl) == nil {
@@ -216,6 +227,13 @@ func fetchResults() {
 					continue
 				}
 				uploaded[c.MatchID] = c.Status
+				// The list arrives newest first, so the first row for a match is
+				// its most recent clip. Do not let an older one overwrite a newer
+				// review state.
+				if _, seen := reviewState[c.MatchID]; !seen && c.ReviewState != "" {
+					reviewState[c.MatchID] = c.ReviewState
+					reviewID[c.MatchID] = c.ReviewID
+				}
 				if c.MatchFolder != "" {
 					folderToMatch[c.MatchFolder] = c.MatchID
 				}
@@ -244,6 +262,7 @@ func fetchResults() {
 			Rounds: m.Rounds, MatchTS: m.MatchTS, Focus: m.Focus,
 			Kills: m.K, Deaths: m.D,
 			ClipPath: local[m.MatchID], ClipUploaded: up, ClipStatus: st,
+			ReviewState: reviewState[m.MatchID], ReviewID: reviewID[m.MatchID],
 		})
 	}
 

@@ -124,6 +124,19 @@ func (p matchPlan) span() (time.Time, time.Time, bool) {
 	return p.Rounds[0].Start, p.Rounds[len(p.Rounds)-1].End, true
 }
 
+// matchID is the backend's id for this match, or "" when the replays could not be
+// read. Added 2026-08-29 so a clip can be written down next to the match it came
+// from: the server has already parsed that match's .rec files and can hand the AI
+// the real map, the real kill feed and the round result instead of guessing them
+// off a handful of sampled frames. An empty answer is ordinary and costs nothing -
+// the review simply runs the way it always has.
+func (p matchPlan) matchID() string {
+	if p.Events == nil {
+		return ""
+	}
+	return p.Events.MatchID
+}
+
 // haveFileKeys reports whether the backend gave us .rec filenames to join on.
 func (p matchPlan) haveFileKeys() bool {
 	if p.Events == nil {

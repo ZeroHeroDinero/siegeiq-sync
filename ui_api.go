@@ -572,6 +572,39 @@ func apiOpenClipFolder() string {
 	return ""
 }
 
+// apiOpenReview opens one finished review on the website.
+//
+// The id is checked against the shape of a uuid before it is put in a URL, not
+// because the window is hostile but because this string arrives from JavaScript
+// and ends up in a shell-adjacent call. A malformed id opens the dashboard, which
+// is where the player wanted to go anyway.
+func apiOpenReview(id string) string {
+	id = strings.TrimSpace(id)
+	ok := len(id) == 36
+	if ok {
+		for i, c := range id {
+			if i == 8 || i == 13 || i == 18 || i == 23 {
+				if c != '-' {
+					ok = false
+					break
+				}
+				continue
+			}
+			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if !isHex {
+				ok = false
+				break
+			}
+		}
+	}
+	if !ok {
+		openURL("https://siegeiq.gg")
+		return ""
+	}
+	openURL("https://siegeiq.gg/?review=" + id)
+	return ""
+}
+
 // apiDeleteClip removes a clip and everything that belongs to it.
 //
 // Guarded by underClipDir on purpose. This function is reachable from

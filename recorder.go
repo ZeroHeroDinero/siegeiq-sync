@@ -960,6 +960,7 @@ func (r *recorder) handleMatch(matchFolder string, files []string, ev *matchEven
 			meta := clipMeta{
 				CreatedAt:           time.Now(),
 				MatchFolder:         filepath.Base(matchFolder),
+				MatchID:             plan.matchID(),
 				RoundIndex:          span.RoundIndex,
 				Label:               span.Label,
 				Reason:              span.Reason,

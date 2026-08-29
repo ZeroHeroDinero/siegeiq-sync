@@ -183,6 +183,7 @@ h2:after{content:"";flex:1;height:1px;background:var(--line)}
 .note{display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border-radius:var(--r2);
   border:1px solid var(--line);border-left:2px solid var(--accent);background:var(--panel);
   font-size:11.5px;line-height:1.5;margin:8px 0}
+.note.ok{border-left-color:var(--good)}
 .note.warn{border-left-color:var(--warn)}
 .note.bad{border-left-color:var(--bad)}
 .note b{font-weight:700}
@@ -923,8 +924,29 @@ function paintResults(R){
     +'<div class="s">'+esc(fs)+'</div></div>';
   h+='</div>';
 
+  // The coaching review for this match, when there is one. Deliberately a
+  // separate line rather than a fifth card: "we are still working on it" and
+  // "here it is" are a sequence the player watches, not a statistic.
+  var rs=m.review_state||"";
+  if(rs==="complete" && m.review_id){
+    h+='<div class="note ok"><div><b>Your review for this match is ready.</b><br>'
+      +'SiegeIQ analysed the clip it recorded and scored the round.</div></div>';
+  } else if(rs==="queued" || rs==="running"){
+    h+='<div class="note"><div><b>Analysing this match now.</b><br>'
+      +'It usually takes a minute or two. This page updates on its own.</div></div>';
+  } else if(rs==="failed"){
+    h+='<div class="note warn"><div><b>That clip could not be reviewed.</b><br>'
+      +'The footage is still safe. Try sending it again from the Clips tab.</div></div>';
+  } else if(rs==="skipped"){
+    h+='<div class="note warn"><div><b>This clip was not reviewed.</b><br>'
+      +'You have used your automatic reviews for today, or the clip was too large.</div></div>';
+  }
+
   h+='<div class="row">';
-  if(m.clip_path) h+='<button class="primary" onclick="playResultClip()">Watch it</button>';
+  if(rs==="complete" && m.review_id){
+    h+='<button class="primary" onclick="openReview('+JSON.stringify(m.review_id)+')">Open my review</button>';
+  }
+  if(m.clip_path) h+='<button'+((rs==="complete"&&m.review_id)?'':' class="primary"')+' onclick="playResultClip()">Watch it</button>';
   h+='<button onclick="refreshResults()">Refresh</button>';
   h+='</div>';
 
@@ -2062,16 +2084,32 @@ function sendStageFor(path){
   for(var i=0;i<list.length;i++){ if(list[i].path===path) return list[i]; }
   return null;
 }
+// sendLine is the one line under a clip that says what is happening to it.
+//
+// It used to stop at "Sent to SiegeIQ", which was true and useless: the clip had
+// arrived somewhere and nothing came back. It now runs compressing -> uploading ->
+// sent -> analysing -> your review is ready, with a button on the end, because the
+// question the player is actually asking is not "did it upload" but "what did it
+// say".
 function sendLine(path){
   var j=sendStageFor(path);
   if(!j) return "";
   var t=j.seconds?(" &middot; "+j.seconds+"s"):"";
   if(j.stage==="compressing") return '<div class="sending">Making a smaller copy to send'+t+"</div>";
   if(j.stage==="uploading")   return '<div class="sending">Uploading to SiegeIQ'+t+"</div>";
-  if(j.stage==="done")        return '<div class="sending ok">Sent to SiegeIQ</div>';
+  if(j.stage==="analysing")   return '<div class="sending">Analysing your round'+t+"</div>";
+  if(j.stage==="reviewed"){
+    var sc=(j.score?(' &middot; scored '+esc(j.score)):"");
+    return '<div class="sending ok">Your review is ready'+sc+"</div>"
+      +'<div class="row" style="margin-top:6px">'
+      +'<button class="primary" onclick="event.stopPropagation();openReview('+JSON.stringify(j.review_id||"")+')">Open my review</button>'
+      +'</div>';
+  }
+  if(j.stage==="done")        return '<div class="sending ok">'+esc(j.note||"Sent to SiegeIQ")+"</div>";
   if(j.stage==="failed")      return '<div class="sending bad">'+esc(j.note||"That send failed")+"</div>";
   return "";
 }
+function openReview(id){ go("goOpenReview",id||""); }
 function del(i){ go("goDeleteClip",C[i].path).then(function(e){
   if(e){ toast(e); } else { toast("Clip deleted."); refresh(); } }); }
 
