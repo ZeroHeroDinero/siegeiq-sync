@@ -212,50 +212,31 @@ func watchReview(cfg config, path, clipID string) {
 	deadline := time.Now().Add(reviewWatchFor)
 	for time.Now().Before(deadline) {
 		time.Sleep(5 * time.Second)
-		rs, err := clipReviewState(&cfg, clipID)
-		if err != nil && rs.State == "" {
+		state, reviewID, score, err := clipReviewState(&cfg, clipID)
+		if err != nil && state == "" {
 			continue // unreachable right now; the review is still running
 		}
-		// Say how many of the day's free synced reviews are left WHILE it is working,
-		// not only when one is refused. A player who can see "3 of 5" coming is never
-		// surprised by the fourth clip coming back unreviewed.
-		if rs.State == "queued" || rs.State == "running" {
-			note := "analysing your round"
-			if rs.Used >= 0 && rs.Cap > 0 {
-				note = fmt.Sprintf("analysing your round (%d of %d free Sync reviews used today)",
-					rs.Used, rs.Cap)
-			}
-			setSendStage(path, sendAnalysing, note)
-		}
-		switch rs.State {
+		switch state {
 		case "complete":
-			setSendReview(path, rs.ID, rs.Score)
+			setSendReview(path, reviewID, score)
 			setSendStage(path, sendReviewed, "your review is ready")
 			logf("recorder: review ready for %s", filepath.Base(path))
 			// The card only exists if the window is open, and after a match it
 			// usually is not. This is the half that reaches somebody who has gone
 			// back into a queue.
-			notifyReviewReady(reviewLabelFor(path), rs.Score)
+			notifyReviewReady(reviewLabelFor(path), score)
 			return
 		case "failed":
 			note := "SiegeIQ could not review that clip"
 			if err != nil {
 				note = err.Error()
-			} else if rs.Note != "" {
-				note = rs.Note
 			}
 			setSendStage(path, sendFailed, note)
 			return
 		case "skipped":
-			// The server's own sentence, verbatim. "not reviewed" was technically
-			// true and told the player nothing, and the commonest reason by far is
-			// the daily free cap, which is a limit rather than a fault.
-			note := rs.Note
-			if note == "" && err != nil {
+			note := "not reviewed"
+			if err != nil {
 				note = err.Error()
-			}
-			if note == "" {
-				note = "not reviewed"
 			}
 			setSendStage(path, sendDone, note)
 			return

@@ -39,24 +39,11 @@ func notifyReviewReady(label string, score int) {
 	if label != "" {
 		what = "Your " + label
 	}
-	// Points at the website rather than at this app, deliberately. Sync is where the
-	// clip is made; siegeiq.gg is where the review, the voice coach, the share button
-	// and every reason to upgrade actually live. Sending a finished review back into a
-	// desktop window is a dead end for the player and for the business. 2026-08-29.
-	detail := "has been analysed. Open it on siegeiq.gg."
+	detail := "has been analysed. Open SiegeIQ Sync to read it."
 	if score > 0 {
-		detail = fmt.Sprintf("scored %d. Open it on siegeiq.gg to see what to fix.", score)
+		detail = fmt.Sprintf("scored %d. Open SiegeIQ Sync to see what to fix.", score)
 	}
 	balloon("Your review is ready", what+" "+detail, true)
-	// Windows suppresses tray balloons while an exclusive full-screen game is running,
-	// and a review lands with Siege still in front nearly every time - so on its own
-	// the balloon above was being swallowed exactly when it mattered. Same reasoning as
-	// notifyUploadOK. The overlay respects the player's own on/off switch.
-	msg := what + " has been reviewed."
-	if score > 0 {
-		msg = fmt.Sprintf("%s scored %d. Your review is ready on siegeiq.gg.", what, score)
-	}
-	overlayShow(msg)
 }
 
 // notifyClipFailed reports a cut that did not work. Silent since 2026-08-22:

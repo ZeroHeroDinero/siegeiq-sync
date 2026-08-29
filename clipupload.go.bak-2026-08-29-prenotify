@@ -186,69 +186,38 @@ func uploadClipFile(cfg *config, rc recorderConfig, clipPath, sendPath, kind, ma
 // A failure here is deliberately quiet and non-terminal. The review is running on
 // the server whatever this poll says, so a dropped wifi connection should leave the
 // card sitting on "analysing" rather than declaring a failure that did not happen.
-// reviewStatus is everything the server will say about one clip's review.
-//
-// It used to be four unnamed return values, and the two that mattered most were
-// not among them: WHY a clip was skipped, and how many of the day's free synced
-// reviews are gone. Without those the app said "not reviewed" to a player who had
-// simply used their five for the day, which reads as a broken feature rather than
-// a limit. 2026-08-29.
-type reviewStatus struct {
-	State  string
-	ID     string
-	Score  int
-	WebURL string
-	// Used and Cap are -1 when the server did not say, so "we do not know" stays
-	// distinguishable from "you have none left".
-	Used int
-	Cap  int
-	// Note is the server's own sentence for a skip or a failure. Shown verbatim:
-	// the rule lives on the server, so the explanation should too.
-	Note string
-}
-
-func clipReviewState(cfg *config, clipID string) (reviewStatus, error) {
-	rs := reviewStatus{Used: -1, Cap: -1}
+func clipReviewState(cfg *config, clipID string) (string, string, int, error) {
 	req, err := http.NewRequest("GET", backend+"/sync/clip/"+clipID+"/review", nil)
 	if err != nil {
-		return rs, err
+		return "", "", 0, err
 	}
 	req.Header.Set("Authorization", "Device "+cfg.DeviceToken)
 	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
-		return rs, err
+		return "", "", 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return rs, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", "", 0, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	var out struct {
 		ReviewState string `json:"reviewState"`
 		ReviewID    string `json:"reviewId"`
 		Score       *int   `json:"score"`
 		Error       string `json:"error"`
-		WebURL      string `json:"webUrl"`
-		Used        *int   `json:"reviewsUsed"`
-		Cap         *int   `json:"reviewsCap"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return rs, err
+		return "", "", 0, err
 	}
-	rs.State, rs.ID, rs.WebURL, rs.Note = out.ReviewState, out.ReviewID, out.WebURL, out.Error
+	score := 0
 	if out.Score != nil {
-		rs.Score = *out.Score
-	}
-	if out.Used != nil {
-		rs.Used = *out.Used
-	}
-	if out.Cap != nil {
-		rs.Cap = *out.Cap
+		score = *out.Score
 	}
 	if out.ReviewState == "failed" && out.Error != "" {
-		return rs, fmt.Errorf("%s", out.Error)
+		return out.ReviewState, out.ReviewID, score, fmt.Errorf("%s", out.Error)
 	}
-	return rs, nil
+	return out.ReviewState, out.ReviewID, score, nil
 }
 
 // putObject streams the file to the signed link.
