@@ -1973,7 +1973,8 @@ var CLIPVIEWSET=false;
 var ICO={
  edit:'<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.21a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>',
  send:'<path d="M12 3l5 5h-3v6h-4V8H7l5-5zM5 16h14v4H5v-4z"/>',
- trash:'<path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>'
+ trash:'<path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>',
+ folder:'<path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/>'
 };
 
 // esc is safe for text but leaves quotes alone, which is fine everywhere it is
@@ -2011,10 +2012,12 @@ function clipActs(i,tile){
   if(!tile){
     return '<button onclick="event.stopPropagation();play('+i+')">Play</button>'
      +'<button onclick="event.stopPropagation();edOpen(C['+i+'],'+i+')">Edit</button>'
+     +'<button title="Show this clip in your clips folder so you can copy the file" onclick="event.stopPropagation();reveal('+i+')">Folder</button>'
      +(live?('<button title="Send this clip to AI Analyze" onclick="event.stopPropagation();send('+i+')">Send</button>'):'')
      +'<button class="danger" onclick="event.stopPropagation();del('+i+')">Delete</button>';
   }
   return iconBtn("Edit","event.stopPropagation();edOpen(C["+i+"],"+i+")",ICO.edit,"")
+   +iconBtn("Show in folder","event.stopPropagation();reveal("+i+")",ICO.folder,"")
    +(live?iconBtn("Send to AI Analyze","event.stopPropagation();send("+i+")",ICO.send,""):"")
    +iconBtn("Delete","event.stopPropagation();del("+i+")",ICO.trash,"danger");
 }
@@ -2063,6 +2066,10 @@ function paintClips(){
   }).join("");
 }
 function play(i){ go("goPlayClip",C[i].path).then(function(e){ if(e) toast(e); }); }
+// reveal opens the clips folder with this clip highlighted. It exists because
+// the tray's "Open clips folder" drops you into a hundred timestamped files and
+// leaves you to work out which one you were just looking at.
+function reveal(i){ go("goRevealClip",C[i].path).then(function(e){ if(e) toast(e); }); }
 // send reports the size, because "Uploading..." on a 283 MB file with no other
 // sign of life is indistinguishable from nothing happening, which is exactly
 // how somebody ends up asking whether it worked.

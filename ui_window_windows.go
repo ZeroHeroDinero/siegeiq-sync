@@ -386,6 +386,7 @@ func bindUI(w webview2.WebView) {
 	bind("goOpenSettingsFile", func(raw string) string { return apiOpenSettingsFile(raw) })
 	bind("goArm", func(on string) string { return apiArm(on) })
 	bind("goPlayClip", func(path string) string { return apiPlayClip(path) })
+	bind("goRevealClip", func(path string) string { return apiRevealClip(path) })
 	bind("goDeleteClip", func(path string) string { return apiDeleteClip(path) })
 	bind("goSendClip", func(path string) string { return apiSendClip(path) })
 	// The clip editor. One call: everything else it does happens in the page,

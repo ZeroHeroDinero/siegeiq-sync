@@ -567,6 +567,22 @@ func apiPlayClip(path string) string {
 	return ""
 }
 
+// apiRevealClip opens the clips folder with one clip already picked out, so the
+// player can copy the actual file out of it.
+//
+// Same boundary as playing a clip: a path that did not come from inside the
+// clips folder never reaches Explorer.
+func apiRevealClip(path string) string {
+	if !underClipDir(path) {
+		return "that file is not in your clips folder"
+	}
+	if !fileExists(path) {
+		return "that clip is no longer on disk"
+	}
+	revealInExplorer(path)
+	return ""
+}
+
 func apiOpenClipFolder() string {
 	rec.openClipFolder()
 	return ""

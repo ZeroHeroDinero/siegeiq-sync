@@ -15,7 +15,7 @@
 ; -----------------------------------------------------------------------------
 
 #define MyAppName "SiegeIQ Sync"
-#define MyAppVersion "1.6.9"
+#define MyAppVersion "1.7.0"
 #define MyAppPublisher "SiegeIQ"
 #define MyAppURL "https://siegeiq.gg"
 #define MyAppExeName "SiegeIQSync.exe"
