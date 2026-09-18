@@ -66,16 +66,14 @@ Parsing [LangOptions], [Messages], and [CustomMessages] sections
 Reading [Code] section
 Parsing [Tasks] section, line 69
 Parsing [Tasks] section, line 70
-Parsing [Icons] section, line 130
-Parsing [Icons] section, line 131
-Parsing [Icons] section, line 132
-Parsing [Registry] section, line 137
-Parsing [Run] section, line 142
+Parsing [Icons] section, line 139
+Parsing [Icons] section, line 140
+Parsing [Icons] section, line 141
+Parsing [Registry] section, line 146
+Parsing [Run] section, line 151
 Parsing [Files] section, line 73
 Parsing [Files] section, line 74
 Parsing [Files] section, line 75
-Parsing [Files] section, line 126
-Parsing [Files] section, line 127
 Compiling [Code] section
 Deleting SiegeIQSync-Setup.exe from output directory
 Creating setup files
@@ -84,12 +82,10 @@ Creating setup files
    Compressing: \\?\C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\SiegeIQSync.exe
    Compressing: \\?\C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\LICENSE
    Compressing: \\?\C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\README.md
-   Compressing: \\?\C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\ffmpeg\ffmpeg.exe
-   Compressing: \\?\C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\ffmpeg\FFMPEG-LICENSE.txt
    Compressing Setup program executable
    Updating version info (Setup.exe)
    Updating manifest (Setup.exe)
 
 
-Successful compile (20.734 sec). Resulting Setup program filename is:
+Successful compile (3.250 sec). Resulting Setup program filename is:
 C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\installer\dist\SiegeIQSync-Setup.exe

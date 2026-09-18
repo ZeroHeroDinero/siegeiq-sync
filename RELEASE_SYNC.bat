@@ -64,7 +64,7 @@ if defined LIVEVER (
     echo.
     exit /b 1
   ) else (
-    echo   Live version: v!LIVEVER!   ^->   publishing v%VER%
+    echo   Live version: v!LIVEVER!   ^-^-^>   publishing v%VER%
   )
 )
 
@@ -240,7 +240,8 @@ REM      threshold was set at 36 MB on an estimate that was off by nearly 3x.
 REM
 REM      ISCC prints one line per file it packs. That is direct evidence and it
 REM      cannot be off by a compression ratio, so that is what gets checked.
-for %%A in ("installer\dist\SiegeIQSync-Setup.exe") do set /a SETUPMB=%%~zA/1048576
+for %%A in ("installer\dist\SiegeIQSync-Setup.exe") do set "SETUPBYTES=%%~zA"
+for /f %%M in ('powershell -NoProfile -Command "'{0:N1}' -f (!SETUPBYTES!/1MB)"') do set "SETUPMB=%%M"
 findstr /I /C:"Compressing" "installer\iscc_log.txt" 2>nul | findstr /I /C:"ffmpeg.exe" >nul
 if not errorlevel 1 (
   set "PACKED=1"
@@ -266,8 +267,10 @@ if defined FFOK (
 )
 
 REM A floor well below any real build, purely to catch a truncated or failed output.
-if !SETUPMB! LSS 5 (
-  echo   [STOP] Installer is only !SETUPMB! MB. Something went wrong.
+REM In BYTES, not truncated megabytes. The old `set /a .../1048576` floor called a
+REM 5,225,861-byte reader installer "4 MB" and aborted the 1.8.1 release on it.
+if !SETUPBYTES! LSS 2000000 (
+  echo   [STOP] Installer is only !SETUPBYTES! bytes. Something went wrong.
   pause
   exit /b 1
 )
@@ -293,7 +296,7 @@ if %errorlevel%==0 (
     "SHA256SUMS.txt" ^
     --repo ZeroHeroDinero/siegeiq-sync ^
     --title "SiegeIQ Sync v%VER%" ^
-    --generate-notes
+    --notes-file "RELEASE_NOTES.md"
   if !errorlevel!==0 (
     echo.
     echo   Published. siegeiq.gg now serves v%VER%.

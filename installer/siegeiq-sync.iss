@@ -15,7 +15,7 @@
 ; -----------------------------------------------------------------------------
 
 #define MyAppName "SiegeIQ Sync"
-#define MyAppVersion "1.8.0"
+#define MyAppVersion "1.8.1"
 #define MyAppPublisher "SiegeIQ"
 #define MyAppURL "https://siegeiq.gg"
 #define MyAppExeName "SiegeIQSync.exe"
@@ -123,8 +123,17 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 #else
   #pragma message "RECORDER: /DNoRecorder given - building a sync-only installer"
 #endif
+
+; These two lines HAVE to sit inside the guard. They used to sit outside it with
+; skipifsourcedoesntexist, which reads like a no-op for a reader build but is not:
+; on a machine that has ffmpeg.exe on disk - which is every machine that ever built
+; the recorder once - the source EXISTS, so it was bundled anyway and /DNoRecorder
+; changed nothing but a log line. Verified live 2026-09-18: v1.8.0 shipped an 8.6 MB
+; portable .exe next to a 30.8 MB installer, and the installer was the download button.
+#ifndef NoRecorder
 Source: "{#FFmpegExe}"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#FFmpegLic}"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion skipifsourcedoesntexist
+#endif
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "Watch for new Siege matches and upload them to SiegeIQ"
