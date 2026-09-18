@@ -1,4 +1,4 @@
-; SiegeIQ Sync - Inno Setup script
+﻿; SiegeIQ Sync - Inno Setup script
 ; -----------------------------------------------------------------------------
 ; Builds SiegeIQSync-Setup.exe: a per-user installer that needs NO admin rights.
 ;
@@ -15,7 +15,7 @@
 ; -----------------------------------------------------------------------------
 
 #define MyAppName "SiegeIQ Sync"
-#define MyAppVersion "1.7.0"
+#define MyAppVersion "1.8.0"
 #define MyAppPublisher "SiegeIQ"
 #define MyAppURL "https://siegeiq.gg"
 #define MyAppExeName "SiegeIQSync.exe"

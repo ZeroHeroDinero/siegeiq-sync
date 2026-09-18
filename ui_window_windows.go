@@ -385,6 +385,8 @@ func bindUI(w webview2.WebView) {
 	bind("goSaveSharePrefs", func(raw string) string { return apiSaveSharePrefs(raw) })
 	bind("goOpenSettingsFile", func(raw string) string { return apiOpenSettingsFile(raw) })
 	bind("goArm", func(on string) string { return apiArm(on) })
+	bind("goRecorderOffer", func(string) string { return apiRecorderOffer() })
+	bind("goInstallRecorder", func(raw string) string { return apiInstallRecorder(raw) })
 	bind("goPlayClip", func(path string) string { return apiPlayClip(path) })
 	bind("goRevealClip", func(path string) string { return apiRevealClip(path) })
 	bind("goDeleteClip", func(path string) string { return apiDeleteClip(path) })

@@ -715,6 +715,35 @@ var (
 
 // apiStartCaptureTest kicks the self-test off and returns IMMEDIATELY.
 //
+// ---- the on-demand recorder -------------------------------------------------
+// ffmpeg is no longer bundled with every install; see the header of ffmpeg_fetch.go.
+// Both calls here are instant. The download itself runs in a goroutine for the same
+// reason the capture test does, explained directly below.
+
+func apiRecorderOffer() string {
+	o := fetchRecorderOffer()
+	return jsonOf(map[string]any{
+		"available": o.Available,
+		"size_mb":   o.SizeMB,
+		"version":   o.Version,
+		"installed": recorderInstalled(),
+		"state":     recorderStatus(),
+	})
+}
+
+func apiInstallRecorder(string) string {
+	if recorderInstalled() {
+		return "already installed"
+	}
+	if o := fetchRecorderOffer(); !o.Available {
+		// Not an error state. It is the normal answer until a download is published,
+		// and the folder instructions on screen are still a complete fix.
+		return "No recorder download is published yet. The folder steps below still work."
+	}
+	installRecorder()
+	return ""
+}
+
 // It runs in the background for a reason learned the hard way: a bound function
 // that blocks for a minute blocks every other bound function with it, and the
 // window goes dead while pretending to be busy. Anything slow starts a

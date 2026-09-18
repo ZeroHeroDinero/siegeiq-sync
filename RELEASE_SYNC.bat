@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM ===================================================================
 REM  Cut a SiegeIQ Sync release and publish it to GitHub.
 REM
@@ -141,33 +141,42 @@ REM
 REM      That is exactly what shipped. This is the check that makes it loud. It
 REM      is a warning and not a hard stop, because a sync-only release is a
 REM      legitimate thing to publish - but it can no longer happen by accident.
-set "FFOK=1"
+REM 2026-09-18: READER-ONLY IS NOW THE DEFAULT PUBLISH, AND THE WARNING ABOVE IS
+REM RETIRED WITH A REASON, NOT JUST DELETED.
+REM
+REM That warning existed because a build without ffmpeg left a player stuck: they
+REM saw "No capture engine" and had no way to fix it themselves. That is no longer
+REM true. The app now offers a one-click download of the recorder into
+REM %APPDATA%\SiegeIQSync\ffmpeg, verified against a sha256 the backend publishes
+REM (see ffmpeg_fetch.go and /sync/ffmpeg). So a reader-only installer is a complete
+REM product rather than a crippled one.
+REM
+REM Why default to it: the recorder is 98 MB on disk and roughly 22 MB inside the
+REM installer, and it is an unsigned 100 MB binary that antivirus inspects on the way
+REM in. Reading .rec replays needs none of that and is the half only SiegeIQ does.
+REM Measured 2026-09-18: 20 people opened the Sync page and 9 installed it.
+REM
+REM The accident this file was hardened against can still not happen: a build that
+REM SHOULD carry the recorder and silently does not is still caught, by the compiler
+REM check further down, which now only runs when you asked for it.
+set "FFOK="
 REM %CD% is the siegeiq-sync folder, so this is a fully resolved absolute path with no
 REM ".." left in it for the compiler to interpret its own way.
-set "ISCCFLAGS=/DFFmpegDir=%CD%\ffmpeg"
-if not exist "ffmpeg\ffmpeg.exe" set "FFOK="
-if not defined FFOK (
-  echo.
-  echo   ============================================================
-  echo   [WARNING] ffmpeg\ffmpeg.exe is MISSING.
-  echo   ============================================================
-  echo   This release will install with NO SCREEN RECORDER. Replay
-  echo   syncing will work; every user who tries to record will see
-  echo   "No capture engine" and cannot fix it themselves.
-  echo.
-  echo   To include it: read ffmpeg\README-PUT-FFMPEG-HERE.txt, drop
-  echo   bin\ffmpeg.exe into the ffmpeg folder, and re-run this.
-  echo.
-  set /p FFGO="  Publish a sync-only build anyway? Type NORECORDER: "
-  if /i not "!FFGO!"=="NORECORDER" (
-    echo   Cancelled. Nothing was published.
+set "ISCCFLAGS=/DNoRecorder /DFFmpegDir=%CD%\ffmpeg"
+echo   Recorder: NOT bundled. This is the default, and the app downloads it on request.
+echo.
+set /p FFGO="  Bundle the 98 MB recorder into this installer instead? Type RECORDER, or press Enter to skip: "
+if /i "!FFGO!"=="RECORDER" (
+  if not exist "ffmpeg\ffmpeg.exe" (
+    echo.
+    echo   [STOP] You asked to bundle the recorder and ffmpeg\ffmpeg.exe is MISSING.
+    echo   Read ffmpeg\README-PUT-FFMPEG-HERE.txt, drop bin\ffmpeg.exe into the
+    echo   ffmpeg folder, and re-run this. Nothing was published.
     pause
     exit /b 0
   )
-  REM Tell the installer script this is deliberate. Without it the compile now
-  REM STOPS on a missing ffmpeg instead of quietly producing a crippled build.
-  set "ISCCFLAGS=/DNoRecorder /DFFmpegDir=!CD!\ffmpeg"
-) else (
+  set "FFOK=1"
+  set "ISCCFLAGS=/DFFmpegDir=!CD!\ffmpeg"
   echo   Recorder: ffmpeg.exe present, will be bundled.
 )
 
@@ -253,7 +262,7 @@ if defined FFOK (
   )
   echo   Recorder CONFIRMED in the installer by the compiler. ^(!SETUPMB! MB^)
 ) else (
-  echo   Installer size: !SETUPMB! MB  ^(sync-only, no recorder^)
+  echo   Installer size: !SETUPMB! MB  ^(reader build - the app fetches the recorder on request^)
 )
 
 REM A floor well below any real build, purely to catch a truncated or failed output.

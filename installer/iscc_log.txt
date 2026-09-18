@@ -10,7 +10,7 @@ Non-commercial use only
 Preprocessing
    Reading file: C:\Program Files\Inno Setup 7\ISPPBuiltins.iss
    Line 113: RECORDER: looking for C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\ffmpeg\ffmpeg.exe
-   Line 122: RECORDER: bundling C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\ffmpeg\ffmpeg.exe
+   Line 124: RECORDER: /DNoRecorder given - building a sync-only installer
 Parsing [Setup] section, line 25
 Parsing [Setup] section, line 26
 Parsing [Setup] section, line 27
@@ -91,5 +91,5 @@ Creating setup files
    Updating manifest (Setup.exe)
 
 
-Successful compile (26.531 sec). Resulting Setup program filename is:
+Successful compile (20.734 sec). Resulting Setup program filename is:
 C:\Users\socia\Desktop\SiegeIQ\CURRENT\siegeiq-sync\installer\dist\SiegeIQSync-Setup.exe

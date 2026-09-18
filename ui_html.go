@@ -1650,8 +1650,14 @@ function paintStatus(){ adoptUIPrefs(S);
 
   var h="";
   if(!S.capture_ready){
-    h=note("bad","<b>No capture engine.</b> "+esc(S.capture_problem)+
-      " Recording cannot start until this is fixed. Syncing is unaffected.");
+    /* 2026-09-18: the recorder is no longer bundled, so "no capture engine" is now the
+       NORMAL state of a fresh install rather than a fault. The note leads with the one
+       click that fixes it and only falls back to the folder instructions when no
+       download has been published. The wording deliberately does not apologise: nothing
+       is broken, this install simply has not been given a recorder yet. */
+    h=note("bad","<b>Recording is not set up on this PC yet.</b> Replay syncing is "+
+      "working normally and is unaffected. <span id=\'recdl\'></span>");
+    setTimeout(paintRecorderOffer,0);
   } else if(S.gave_up){
     h=note("bad","<b>Recording is not working on this PC.</b> The recorder tried and stopped, "+
       "rather than retrying forever. Click <b>Run capture test</b> above and it will try every way "+
@@ -1699,6 +1705,30 @@ function paintStatus(){ adoptUIPrefs(S);
 }
 function setArm(on){
   go("goArm",on?"on":"off").then(function(){ refresh(); });
+}
+/* Draws the one-click recorder download into the no-encoder note. Everything here is
+   best-effort: if the bridge, the backend or the download is unavailable the player is
+   left with the folder instructions that have always worked, which is why none of this
+   throws. 2026-09-18. */
+function paintRecorderOffer(){
+  var el=document.getElementById("recdl"); if(!el) return;
+  go("goRecorderOffer").then(function(raw){
+    var d={}; try{ d=JSON.parse(raw||"{}"); }catch(e){}
+    if(d.installed){ el.innerHTML="The recorder is installed. Restart SiegeIQ Sync to use it."; return; }
+    if(d.state==="working"){ el.innerHTML="Downloading the recorder..."; setTimeout(paintRecorderOffer,1500); return; }
+    if(d.state==="done"){ el.innerHTML="Recorder installed. Restart SiegeIQ Sync to use it."; return; }
+    if(d.state&&d.state!==""){ el.innerHTML="That did not work: "+esc(d.state)+" You can still do it by hand, see the log for the folder."; return; }
+    if(!d.available){ el.innerHTML="To add it, see the instructions in the SiegeIQ Sync folder."; return; }
+    el.innerHTML='<button class="btn" onclick="installRecorder()">Add recording'+
+      (d.size_mb?' ('+d.size_mb+' MB)':'')+'</button>';
+  });
+}
+function installRecorder(){
+  var el=document.getElementById("recdl"); if(el) el.innerHTML="Starting...";
+  go("goInstallRecorder","").then(function(msg){
+    if(msg&&msg!==""){ if(el) el.innerHTML=esc(msg); return; }
+    setTimeout(paintRecorderOffer,600);
+  });
 }
 function note(cls,html){
   return '<div class="note '+cls+'"><svg viewBox="0 0 24 24" fill="currentColor">'+
