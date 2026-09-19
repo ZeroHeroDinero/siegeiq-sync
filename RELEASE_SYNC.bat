@@ -287,6 +287,12 @@ echo   [4/5] Pushing the source that produced this build...
 call PUBLISH_SYNC_GITHUB.bat
 
 echo.
+REM  RELEASE_NOTES.md is now the ONLY place release notes are written. Its first line,
+REM  the one starting "> ", is what a player sees in the tray notification and the update
+REM  prompt; the rest is the release page. The backend reads it back off the release, so
+REM  there is nothing to update separately. Until 18 Sep 2026 that sentence lived in the
+REM  Railway variable SYNC_LATEST_NOTES instead, cutting a release did not touch it, and
+REM  the app spent a version telling players about a fix from the version before.
 echo   [5/5] Creating the GitHub release...
 where gh >nul 2>nul
 if %errorlevel%==0 (

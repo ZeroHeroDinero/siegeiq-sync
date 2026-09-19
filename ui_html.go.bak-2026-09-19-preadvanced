@@ -404,14 +404,6 @@ button.qlen{height:22px;padding:0 9px;font-size:11px;background:var(--panel2)}
 .tiny{font-size:10.5px}.muted{color:var(--dim)}.grow{flex:1;min-width:0}
 .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ADVANCED TOOLS, 2026-09-19. Sync is a coaching recorder first: the default screen is
-   deaths and reviews only. The clip editor, appearance settings, tournament mode, the in-game
-   reminder and settings sharing still work, they just live behind "Show advanced tools" so a
-   new player is not handed a full recorder. Nothing was deleted. */
-body:not(.advanced) .adv{display:none!important}
-.adv-wrap{display:contents}
-.advsw{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--faint);margin:0 0 8px;cursor:pointer;user-select:none}
-.advsw input{margin:0}
 </style>
 </head>
 <body>
@@ -432,15 +424,14 @@ body:not(.advanced) .adv{display:none!important}
   <nav class="nav" id="nav">
     <a data-sec="dashboard" class="on" onclick="showSec(&#39;dashboard&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>Dashboard</a>
     <a data-sec="clips" onclick="showSec(&#39;clips&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm3 2.5v7l6-3.5-6-3.5z"/></svg>Clips<span class="n" id="clipn"></span></a>
-    <a class="adv" data-sec="editor" onclick="showSec(&#39;editor&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M9.6 7.4 4 3 3 4l5.6 4.4L9.6 7.4zM14.4 7.4 20 3l1 1-5.6 4.4-1-1zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 21l5.6-4.4L8.6 15.6 3 20l1 1zm16 0 1-1-5.6-4.4-1 1L20 21z"/></svg>Editor</a>
+    <a data-sec="editor" onclick="showSec(&#39;editor&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M9.6 7.4 4 3 3 4l5.6 4.4L9.6 7.4zM14.4 7.4 20 3l1 1-5.6 4.4-1-1zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM4 21l5.6-4.4L8.6 15.6 3 20l1 1zm16 0 1-1-5.6-4.4-1 1L20 21z"/></svg>Editor</a>
     <a data-sec="results" onclick="showSec(&#39;results&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 20h3v-8H4v8zm6.5 0h3V4h-3v16zM17 20h3v-5h-3v5z"/></svg>Results</a>
     <a data-sec="recording" onclick="showSec(&#39;recording&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 15a5 5 0 110-10 5 5 0 010 10z"/></svg>Recording</a>
-    <a class="adv" data-sec="appearance" onclick="showSec(&#39;appearance&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 2 2 0 0 0 2-2v-1a2 2 0 0 1 2-2h1a3 3 0 0 0 3-3A10 10 0 0 0 12 2zM6.5 12A1.5 1.5 0 1 1 8 10.5 1.5 1.5 0 0 1 6.5 12zm3-4A1.5 1.5 0 1 1 11 6.5 1.5 1.5 0 0 1 9.5 8zm5 0A1.5 1.5 0 1 1 16 6.5 1.5 1.5 0 0 1 14.5 8zm3 4A1.5 1.5 0 1 1 19 10.5 1.5 1.5 0 0 1 17.5 12z"/></svg>Appearance</a>
+    <a data-sec="appearance" onclick="showSec(&#39;appearance&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 2 2 0 0 0 2-2v-1a2 2 0 0 1 2-2h1a3 3 0 0 0 3-3A10 10 0 0 0 12 2zM6.5 12A1.5 1.5 0 1 1 8 10.5 1.5 1.5 0 0 1 6.5 12zm3-4A1.5 1.5 0 1 1 11 6.5 1.5 1.5 0 0 1 9.5 8zm5 0A1.5 1.5 0 1 1 16 6.5 1.5 1.5 0 0 1 14.5 8zm3 4A1.5 1.5 0 1 1 19 10.5 1.5 1.5 0 0 1 17.5 12z"/></svg>Appearance</a>
     <a data-sec="sounds" onclick="showSec(&#39;sounds&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0014 7.97v8.05A4.47 4.47 0 0016.5 12z"/></svg>Sounds</a>
     <a data-sec="about" onclick="showSec(&#39;about&#39;)"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>About</a>
   </nav>
   <div class="sidefoot">
-    <label class="advsw"><input type="checkbox" id="advsw" onchange="setAdvanced(this.checked)">Show advanced tools</label>
     <div class="state" id="statepill"><span class="dot" id="statedot"></span><span id="stateline">Connecting...</span></div>
     <button class="ghost wide" onclick="go(&#39;goHide&#39;)">Hide to tray</button>
   </div>
@@ -640,7 +631,6 @@ body:not(.advanced) .adv{display:none!important}
   <p class="hint">SiegeIQ Sync watches one folder for the replay files Siege writes itself, and
   records your screen only while Siege is running. It never reads the game&#39;s memory, never
   touches the game process, and opens no network ports. Clips stay on this PC until you send one.</p>
-  <div class="adv">
   <h2 style="margin-top:26px">Share your Siege settings</h2>
   <p class="hint">Both of these are off until you switch them on. Sync reads one file,
   <code id="share-file">GameSettings.ini</code>, and only the parts you tick below. Turning
@@ -649,7 +639,6 @@ body:not(.advanced) .adv{display:none!important}
   <div class="row">
     <button class="primary" onclick="saveShare()">Save</button>
     <button onclick="openSettingsFile()">Show me the file</button>
-  </div>
   </div>
 
   <div class="grid2" id="aboutgrid"></div>
@@ -1571,15 +1560,6 @@ function saveUIPrefs(){
   });
 }
 
-function setAdvanced(on){
-  try{ localStorage.setItem("siq_adv", on?"1":"0"); }catch(e){}
-  document.body.classList.toggle("advanced", !!on);
-  var b=document.getElementById("advsw"); if(b) b.checked=!!on;
-  if(!on && (CURSEC==="editor"||CURSEC==="appearance")) showSec("dashboard");
-}
-(function(){ var on=false; try{ on=localStorage.getItem("siq_adv")==="1"; }catch(e){}
-  function apply(){ setAdvanced(on); }
-  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",apply); else apply(); })();
 function showSec(name){
   CURSEC=name;
   var secs=document.querySelectorAll(".main section");
@@ -1763,10 +1743,7 @@ function card(k,v,s,pct,cls){
 
 function paintOptions(){
   document.getElementById("modes").innerHTML=MODES.map(function(o){
-    var h=opt("mode",o[0],o[1],o[2],o[3],settings.mode===o[0]);
-    // Tournament mode is an advanced tool, unless it is the mode already in use.
-    if(o[0]==="tournament" && settings.mode!=="tournament") h='<div class="adv">'+h+'</div>';
-    return h;}).join("");
+    return opt("mode",o[0],o[1],o[2],o[3],settings.mode===o[0]);}).join("");
   document.getElementById("rules").innerHTML=RULES.map(function(o){
     return opt("keep_rule",o[0],o[1],o[2],o[3],settings.keep_rule===o[0]);}).join("");
 }
@@ -1846,10 +1823,10 @@ function paintFields(){
    +num("quality","Quality",settings.quality,"Lower is better and larger. 23 is a sensible default.")
    +num("max_mbps","Size ceiling (Mbps)",settings.max_mbps,"0 works it out from your resolution and frame rate. Caps how large a busy scene can get.")
    +sel("audio_off","Game sound",settings.audio_off?"off":"on",["on","off"],"Records what your speakers play, if this PC exposes a device that carries it. On some PCs that includes other apps, such as voice chat.")
-   +'<div class="adv-wrap adv">'+sel("overlay_on","In-game reminder",settings.overlay_on?"on":"off",["off","on"],"Between rounds, shows your current focus over the game for six seconds. One line, no numbers, never during a round. Also on the tray menu under Recorder.")
+   +sel("overlay_on","In-game reminder",settings.overlay_on?"on":"off",["off","on"],"Between rounds, shows your current focus over the game for six seconds. One line, no numbers, never during a round. Also on the tray menu under Recorder.")
    +'<div class="fld"><label>Check the reminder</label>'
    +'<button onclick="previewOverlay()">Show it now</button>'
-   +'<div class="h">Draws it straight away so you can see where it lands, even with the switch off.</div></div></div>' 
+   +'<div class="h">Draws it straight away so you can see where it lands, even with the switch off.</div></div>' 
    +selNum("buffer_minutes","Buffer length",settings.buffer_minutes,
         [[15,"15 minutes"],[30,"30 minutes"],[45,"45 minutes, a full ranked match"],
          [60,"1 hour"],[90,"1 hour 30"],[120,"2 hours"]],
@@ -2064,7 +2041,7 @@ function clipActs(i,tile){
   var live=S.clip_upload_live;
   if(!tile){
     return '<button onclick="event.stopPropagation();play('+i+')">Play</button>'
-     +'<button class="adv" onclick="event.stopPropagation();edOpen(C['+i+'],'+i+')">Edit</button>'
+     +'<button onclick="event.stopPropagation();edOpen(C['+i+'],'+i+')">Edit</button>'
      +'<button title="Show this clip in your clips folder so you can copy the file" onclick="event.stopPropagation();reveal('+i+')">Folder</button>'
      +(live?('<button title="Send this clip to AI Analyze" onclick="event.stopPropagation();send('+i+')">Send</button>'):'')
      +'<button class="danger" onclick="event.stopPropagation();del('+i+')">Delete</button>';

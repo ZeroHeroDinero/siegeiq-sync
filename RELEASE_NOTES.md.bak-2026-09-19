@@ -1,4 +1,4 @@
-> Sync is simpler. The main screen is now just your matches, your clips and your reviews. The clip editor, themes, tournament mode, the in-game reminder and settings sharing are still there under "Show advanced tools" at the bottom left.
+> The download is about 5 MB now instead of 31 MB. The screen recorder is no longer bundled with every install. Turn it on inside the app and Sync fetches that part only if you want it. Everything else works exactly the same.
 
 <!-- The line above is not decoration. The backend reads the FIRST BLOCKQUOTE of this
      release and that is the sentence players see in the tray notification and the
@@ -14,12 +14,16 @@ It does not record your screen. It does not go near the game.
 
 ## What changed in this version
 
-**A cleaner main screen.** Sync is a coaching recorder first, so the default view only shows
-what you need to get a review: your matches, your clips and the Results page.
+**The download is small now.** Around 5 MB instead of 31 MB. The screen recorder used to
+be baked into every install whether you wanted it or not, and it was most of the download.
+It is no longer included.
 
-**Nothing was removed.** The clip editor, Appearance settings, tournament recording mode, the
-in-game reminder and Siege settings sharing all still work. Tick "Show advanced tools" at the
-bottom left of the window to bring them back. Sync remembers your choice.
+**Recording is still there if you want it.** Turn it on inside the app and Sync fetches
+that part on its own, once, and checks it before using it. If you never turn it on, nothing
+extra is ever downloaded.
+
+**Everything else works the same.** Same pairing code, same folder, same uploads, same
+Verified Stats. If you already have Sync installed it updates itself.
 
 ## Files
 
