@@ -36,7 +36,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -386,17 +385,6 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 	mStatus.SetTitle("Watching for matches...")
 	systray.SetTooltip("SiegeIQ Sync - watching for matches")
 
-	// NO BACKLOG UPLOADS (1.9.1, 2026-09-19). Peter's call: Sync must not dump every old
-	// match in the MatchReplay folder onto the server the moment it is installed or
-	// started. Before this, a fresh install (empty state) or a wiped state file uploaded
-	// the whole folder in one burst. Now a match whose newest round file was written
-	// BEFORE this launch is left alone and only matches played while Sync is running go
-	// up. A match that was in progress at launch still uploads, because its last round
-	// file lands after startedAt. Nothing is written to state for a skipped match, so this
-	// decision is re-made on every launch and never hides a match permanently.
-	startedAt := time.Now().Add(-5 * time.Second)
-	backlogLogged := map[string]bool{}
-
 	for {
 		// NOTE: the scan itself is no longer skipped while syncing is paused.
 		// The recorder needs to see settled matches even when nothing is being
@@ -429,13 +417,6 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 			// than becoming three levels of nested if.
 			ev := func() *matchEvents {
 				if atomic.LoadInt32(&paused) == 1 {
-					return nil
-				}
-				if st.Uploaded[name] == "" && newestModTime(files).Before(startedAt) {
-					if !backlogLogged[name] {
-						backlogLogged[name] = true
-						logf("skipping %s - it was already on disk when Sync started (old matches are not uploaded)", name)
-					}
 					return nil
 				}
 				if prev := st.Uploaded[name]; prev != "" {
@@ -517,16 +498,4 @@ func runSync(mStatus, mStartup *systray.MenuItem) {
 		}
 		time.Sleep(scanEvery)
 	}
-}
-
-// newestModTime is the latest modification time across a match's round files. Used to tell
-// a match played while Sync is running from one that was already sitting in the folder.
-func newestModTime(files []string) time.Time {
-	var newest time.Time
-	for _, f := range files {
-		if fi, err := os.Stat(f); err == nil && fi.ModTime().After(newest) {
-			newest = fi.ModTime()
-		}
-	}
-	return newest
 }
